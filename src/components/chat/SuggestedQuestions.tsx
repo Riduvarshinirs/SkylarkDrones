@@ -1,10 +1,10 @@
 const SUGGESTED_QUESTIONS = [
-  "How is our pipeline looking this quarter?",
-  "Which sectors are performing best?",
-  "Which deals are at risk?",
-  "How many work orders are currently delayed?",
-  "Compare sales pipeline with work-order activity.",
-  "Give me a leadership update for this month.",
+  "How is our pipeline looking?",
+  "Which sector is strongest?",
+  "What are our biggest opportunities?",
+  "What work orders are at risk?",
+  "Compare sales and operations",
+  "Generate a leadership update",
 ];
 
 export function SuggestedQuestions({

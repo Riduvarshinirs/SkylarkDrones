@@ -1,34 +1,24 @@
 @import "tailwindcss";
 
 :root {
-  /* Surfaces */
-  --color-paper: #f1f2ed;      /* app background — cool grid-paper, not warm cream */
-  --color-panel: #ffffff;      /* card / entry surfaces */
+  --color-paper: #f1f2ed;
+  --color-panel: #ffffff;
   --color-panel-raised: #fbfbf9;
-
-  /* Text */
-  --color-ink: #14181f;        /* primary text */
-  --color-graphite: #5b6270;   /* secondary text */
+  --color-ink: #14181f;
+  --color-graphite: #5b6270;
   --color-graphite-soft: #8a8f99;
-
-  /* Structure */
-  --color-line: #dcded6;       /* hairline borders / grid rules */
+  --color-line: #dcded6;
   --color-line-strong: #c7cabf;
-
-  /* Accent: safety-orange, grounded in survey/hi-vis equipment */
   --color-signal: #e2570c;
   --color-signal-tint: #fbe4d4;
   --color-signal-ink: #7a2c04;
-
-  /* Status */
-  --color-locked: #2f7a4f;     /* success / positive (GPS-lock green) */
+  --color-locked: #2f7a4f;
   --color-locked-tint: #e1f0e6;
-  --color-risk: #c0392b;       /* alert / risk */
+  --color-risk: #c0392b;
   --color-risk-tint: #f8e2df;
-  --color-sky: #2b5fa8;        /* secondary data accent */
+  --color-sky: #2b5fa8;
   --color-sky-tint: #e2eaf4;
 
-  /* Fonts (self-hosted via @fontsource, see layout.tsx) */
   --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
   --font-body: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace;
@@ -72,7 +62,12 @@ body {
   border-color: var(--color-line);
 }
 
-/* Subtle, deliberate motion only — respects reduced-motion preference */
+button,
+input,
+textarea {
+  font: inherit;
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .fade-in {
     animation: fadeIn 220ms ease-out;
@@ -100,7 +95,6 @@ body {
   animation: pulseDot 1.6s ease-in-out infinite;
 }
 
-/* Custom scrollbar - thin, quiet */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--color-line-strong) transparent;

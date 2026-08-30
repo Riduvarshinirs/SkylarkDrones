@@ -23,8 +23,8 @@ export function MessageInput({
   }
 
   return (
-    <div className="border border-line bg-panel focus-within:border-signal/60">
-      <div className="flex items-end gap-3 px-4 py-3">
+    <div className="overflow-hidden rounded-2xl border border-line bg-panel shadow-[0_10px_30px_rgba(20,24,31,0.04)] focus-within:border-signal/60">
+      <div className="flex items-end gap-3 px-4 py-3 sm:px-5">
         <textarea
           ref={textareaRef}
           value={value}
@@ -33,19 +33,20 @@ export function MessageInput({
           disabled={disabled}
           rows={1}
           placeholder="Ask about pipeline, revenue, sectors, or operations…"
-          className="max-h-32 min-h-6 flex-1 resize-none bg-transparent text-[0.9rem] text-ink placeholder:text-graphite-soft focus:outline-none disabled:opacity-50"
+          className="max-h-28 min-h-[2.5rem] flex-1 resize-none bg-transparent text-[0.92rem] text-ink placeholder:text-graphite-soft focus:outline-none disabled:opacity-50"
         />
         <button
           type="button"
           onClick={onSubmit}
           disabled={disabled || !value.trim()}
-          className="shrink-0 bg-ink px-4 py-1.5 text-[0.8rem] font-medium text-panel transition-colors hover:bg-signal disabled:cursor-not-allowed disabled:bg-line disabled:text-graphite-soft"
+          className="shrink-0 rounded-full bg-ink px-4 py-2 text-[0.78rem] font-medium text-panel transition-colors hover:bg-signal disabled:cursor-not-allowed disabled:bg-line disabled:text-graphite-soft"
         >
           Ask
         </button>
       </div>
-      <div className="border-t border-line px-4 py-1.5 font-mono text-[0.65rem] text-graphite-soft">
-        Enter to ask · Shift+Enter for a new line
+      <div className="flex items-center justify-between gap-3 border-t border-line px-4 py-1.5 text-[0.62rem] font-mono uppercase tracking-[0.1em] text-graphite-soft">
+        <span>Enter to ask</span>
+        <span>Shift + Enter for new line</span>
       </div>
     </div>
   );

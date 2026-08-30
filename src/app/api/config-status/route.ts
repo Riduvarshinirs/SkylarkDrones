@@ -11,6 +11,6 @@ import { isMondayConfigured } from "@/services/monday/client";
 export async function GET() {
   return NextResponse.json({
     mondayConfigured: isMondayConfigured(),
-    agentImplemented: false,
+    agentImplemented: true,
   });
 }

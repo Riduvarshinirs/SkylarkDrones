@@ -42,7 +42,70 @@ export interface MondayBoardData {
 // ---------------------------------------------------------------------------
 
 export interface Deal {
-  itemId: string;
+  itemId: unknown;
+  dealName: unknown;
+  ownerCode: unknown;
+  clientCode: unknown;
+  dealStatus: unknown;
+  actualCloseDate: unknown;
+  closureProbability: unknown;
+  dealValue: unknown;
+  tentativeCloseDate: unknown;
+  dealStage: unknown;
+  productDeal: unknown;
+  sector: unknown;
+  createdDate: unknown;
+}
+
+export interface WorkOrder {
+  itemId: unknown;
+  dealNameMasked: unknown;
+  customerNameCode: unknown;
+  serialNumber: unknown;
+  natureOfWork: unknown;
+  executionStatus: unknown;
+  dataDeliveryDate: unknown;
+  poDate: unknown;
+  documentType: unknown;
+  probableStartDate: unknown;
+  probableEndDate: unknown;
+  ownerCode: unknown;
+  sector: unknown;
+  typeOfWork: unknown;
+  amountExclGst: unknown;
+  amountInclGst: unknown;
+  billedValueExclGst: unknown;
+  billedValueInclGst: unknown;
+  collectedAmountInclGst: unknown;
+  amountReceivable: unknown;
+  invoiceStatus: unknown;
+  woStatusBilled: unknown;
+  billingStatus: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Normalized records — cleaned, typed, and quality-tagged
+// ---------------------------------------------------------------------------
+
+/** Why a field or record was excluded from a calculation. */
+export interface DataQualityIssue {
+  field: string;
+  recordId: string;
+  issue:
+    | "missing_value"
+    | "unparseable_date"
+    | "unparseable_number"
+    | "duplicate_record"
+    | "junk_header_row"
+    | "inconsistent_category"
+    | "unmatched_join_key"
+    | "missing_identifier"
+    | "incomplete_record";
+  detail?: string;
+}
+
+export interface NormalizedDeal extends Deal {
+  itemId: string | null;
   dealName: string | null;
   ownerCode: string | null;
   clientCode: string | null;
@@ -55,10 +118,13 @@ export interface Deal {
   productDeal: string | null;
   sector: string | null;
   createdDate: string | null;
+  qualityFlags: DataQualityIssue[];
+  isUsableForValueCalc: boolean;
+  isUsableForDateCalc: boolean;
 }
 
-export interface WorkOrder {
-  itemId: string;
+export interface NormalizedWorkOrder extends WorkOrder {
+  itemId: string | null;
   dealNameMasked: string | null;
   customerNameCode: string | null;
   serialNumber: string | null;
@@ -81,34 +147,6 @@ export interface WorkOrder {
   invoiceStatus: string | null;
   woStatusBilled: string | null;
   billingStatus: string | null;
-}
-
-// ---------------------------------------------------------------------------
-// Normalized records — cleaned, typed, and quality-tagged
-// ---------------------------------------------------------------------------
-
-/** Why a field or record was excluded from a calculation. */
-export interface DataQualityIssue {
-  field: string;
-  recordId: string;
-  issue:
-    | "missing_value"
-    | "unparseable_date"
-    | "unparseable_number"
-    | "duplicate_record"
-    | "junk_header_row"
-    | "inconsistent_category"
-    | "unmatched_join_key";
-  detail?: string;
-}
-
-export interface NormalizedDeal extends Deal {
-  qualityFlags: DataQualityIssue[];
-  isUsableForValueCalc: boolean;
-  isUsableForDateCalc: boolean;
-}
-
-export interface NormalizedWorkOrder extends WorkOrder {
   qualityFlags: DataQualityIssue[];
   isUsableForValueCalc: boolean;
   isUsableForDateCalc: boolean;
@@ -158,6 +196,24 @@ export interface DataQualityReport {
   caveats: string[];
 }
 
+export interface NormalizationSummary {
+  totalRecords: number;
+  validRecords: number;
+  incompleteRecords: number;
+  excludedRecords: number;
+  missingFields: Record<string, number>;
+  invalidDates: number;
+  invalidNumericValues: number;
+  warnings: string[];
+  issueCounts: Partial<Record<DataQualityIssue["issue"], number>>;
+}
+
+/** A normalized source dataset and its machine-consumable quality report. */
+export interface NormalizedDataset<T> {
+  records: T[];
+  dataQuality: NormalizationSummary;
+}
+
 export interface AnalyticsResult<T = Record<string, unknown>> {
   intent: QueryIntentType;
   data: T;
@@ -181,13 +237,23 @@ export interface TableData {
   rows: Array<Array<string | number>>;
 }
 
+export interface AgentMetric {
+  label: string;
+  value: string;
+  detail?: string;
+}
+
 export interface AgentResponse {
   answer: string;
   insight?: string;
+  key_metrics?: AgentMetric[];
+  insights?: string[];
   kpis?: KpiCardData[];
   table?: TableData;
+  data_quality?: DataQualityReport | Record<string, unknown>;
   dataQuality?: DataQualityReport;
   caveats?: string[];
+  sources_context?: string[];
   clarificationNeeded?: string;
   error?: string;
 }

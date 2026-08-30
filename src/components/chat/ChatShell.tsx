@@ -48,7 +48,12 @@ export function ChatShell() {
         setEntries((prev) =>
           prev.map((e) =>
             e.id === id
-              ? { ...e, status: "complete", answer: data.answer }
+              ? {
+                  ...e,
+                  status: "complete",
+                  answer: data.answer,
+                  response: data,
+                }
               : e,
           ),
         );
@@ -88,20 +93,31 @@ export function ChatShell() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col px-6 sm:px-8">
+      <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 sm:px-6 lg:px-8">
         {isEmpty ? (
-          <div className="fade-in flex flex-1 flex-col justify-center py-16">
-            <p className="mb-2 font-mono text-[0.7rem] uppercase tracking-[0.14em] text-graphite-soft">
+          <div className="fade-in flex flex-1 flex-col justify-center py-10 sm:py-14 lg:py-18">
+            <div className="mb-4 inline-flex w-fit items-center gap-2 rounded-full border border-line bg-panel px-3 py-1.5 font-mono text-[0.68rem] uppercase tracking-[0.12em] text-graphite-soft">
+              <span className="h-1.5 w-1.5 rounded-full bg-locked" aria-hidden="true" />
               Executive analyst
-            </p>
-            <h2 className="mb-3 max-w-lg font-display text-[1.75rem] font-semibold leading-[1.15] tracking-tight text-ink">
-              What do you want to know?
+            </div>
+            <h2 className="mb-3 max-w-2xl font-display text-[2rem] font-semibold leading-[1.05] tracking-tight text-ink sm:text-[2.5rem]">
+              Ask the business, not the spreadsheet.
             </h2>
-            <p className="mb-8 max-w-lg text-[0.92rem] leading-relaxed text-graphite">
-              Ask about pipeline, revenue, sector performance, or operational
-              risk. Answers are calculated from live monday.com data, with
-              coverage and caveats shown alongside every number.
+            <p className="mb-8 max-w-2xl text-[0.96rem] leading-relaxed text-graphite sm:text-[1rem]">
+              Track pipeline, revenue, sector performance, operational execution, and risk with a concise executive view grounded in live monday.com data and deterministic analytics.
             </p>
+
+            <div className="mb-6 flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => submitQuestion("Generate a leadership update")}
+                disabled={isBusy}
+                className="rounded-full bg-ink px-4 py-2 text-[0.8rem] font-medium text-panel transition-colors hover:bg-signal disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Generate leadership update
+              </button>
+            </div>
+
             <SuggestedQuestions onSelect={submitQuestion} disabled={isBusy} />
           </div>
         ) : (
@@ -113,13 +129,15 @@ export function ChatShell() {
           </div>
         )}
 
-        <div className="sticky bottom-0 bg-paper pb-6 pt-2">
-          <MessageInput
-            value={input}
-            onChange={setInput}
-            onSubmit={() => submitQuestion(input)}
-            disabled={isBusy}
-          />
+        <div className="sticky bottom-0 border-t border-line bg-paper/90 pb-6 pt-3 backdrop-blur-sm">
+          <div className="mx-auto max-w-5xl">
+            <MessageInput
+              value={input}
+              onChange={setInput}
+              onSubmit={() => submitQuestion(input)}
+              disabled={isBusy}
+            />
+          </div>
         </div>
       </div>
     </div>
