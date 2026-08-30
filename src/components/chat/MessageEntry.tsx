@@ -316,29 +316,29 @@ export function MessageEntry({ entry }: { entry: EntryData }) {
                   <div>
                     <div className="mb-1 font-medium text-ink">Data sources</div>
                     <div className="flex flex-wrap gap-2">
-                      {analysisDetails.dataSources.map((source) => (
+                      {(analysisDetails.dataSources ?? []).map((source) => (
                         <span key={source} className="rounded-full border border-line bg-panel px-2 py-1 font-mono text-[0.62rem] uppercase tracking-[0.08em] text-graphite">{source}</span>
                       ))}
                     </div>
                   </div>
                   <div>
                     <div className="mb-1 font-medium text-ink">Filters</div>
-                    <div>{analysisDetails.filters.join(", ")}</div>
+                    <div>{(analysisDetails.filters ?? []).join(", ") || "No filters"}</div>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div className="rounded-lg border border-line bg-panel p-3">
                       <div className="font-mono text-[0.62rem] uppercase tracking-[0.08em] text-graphite-soft">Records analyzed</div>
-                      <div className="mt-1 text-lg font-semibold text-ink">{analysisDetails.recordsAnalyzed}</div>
+                      <div className="mt-1 text-lg font-semibold text-ink">{analysisDetails.recordsAnalyzed ?? 0}</div>
                     </div>
                     <div className="rounded-lg border border-line bg-panel p-3">
                       <div className="font-mono text-[0.62rem] uppercase tracking-[0.08em] text-graphite-soft">Records excluded</div>
-                      <div className="mt-1 text-lg font-semibold text-ink">{analysisDetails.recordsExcluded}</div>
+                      <div className="mt-1 text-lg font-semibold text-ink">{analysisDetails.recordsExcluded ?? 0}</div>
                     </div>
                   </div>
                   <div>
                     <div className="mb-1 font-medium text-ink">Reason</div>
                     <ul className="list-disc space-y-1 pl-5">
-                      {analysisDetails.reason.map((item) => (
+                      {(analysisDetails.reason ?? []).map((item) => (
                         <li key={item}>{item}</li>
                       ))}
                     </ul>
