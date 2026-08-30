@@ -28,30 +28,34 @@ test("fetchDealsBoard parses monday GraphQL pagination and keeps live metadata",
   process.env.MONDAY_API_TOKEN = "token-123";
   process.env.MONDAY_DEALS_BOARD_ID = "deals-board";
 
-  globalThis.fetch = (async () => ({
-    ok: true,
-    json: async () => ({
-      data: {
-        boards: [
-          {
-            items_page: {
-              cursor: "next-cursor",
-              items: [
-                {
-                  id: "d1",
-                  name: "Deal A",
-                  column_values: [
-                    { id: "status", text: "Open", value: "\"Open\"", type: "text" },
-                    { id: "dealvalue", text: "₹1,000", value: "\"₹1,000\"", type: "numeric" },
-                  ],
-                },
-              ],
+  let calls = 0;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return {
+      ok: true,
+      json: async () => ({
+        data: {
+          boards: [
+            {
+              items_page: {
+                cursor: calls > 1 ? null : "next-cursor",
+                items: calls > 1 ? [] : [
+                  {
+                    id: "d1",
+                    name: "Deal A",
+                    column_values: [
+                      { id: "status", text: "Open", value: "\"Open\"", type: "text" },
+                      { id: "dealvalue", text: "₹1,000", value: "\"₹1,000\"", type: "numeric" },
+                    ],
+                  },
+                ],
+              },
             },
-          },
-        ],
-      },
-    }),
-  })) as unknown as typeof fetch;
+          ],
+        },
+      }),
+    };
+  }) as unknown as typeof fetch;
 
   try {
     const result = await fetchDealsBoard({ apiToken: "token-123", dealsBoardId: "deals-board", workOrdersBoardId: "wo-board" });
@@ -63,6 +67,35 @@ test("fetchDealsBoard parses monday GraphQL pagination and keeps live metadata",
     globalThis.fetch = previousFetch;
     if (originalToken === undefined) delete process.env.MONDAY_API_TOKEN; else process.env.MONDAY_API_TOKEN = originalToken;
     if (originalBoardId === undefined) delete process.env.MONDAY_DEALS_BOARD_ID; else process.env.MONDAY_DEALS_BOARD_ID = originalBoardId;
+  }
+});
+
+test("fetchDealsBoard rejects repeated pagination cursors to prevent infinite loops", async () => {
+  const previousFetch = globalThis.fetch;
+
+  globalThis.fetch = (async () => ({
+    ok: true,
+    json: async () => ({
+      data: {
+        boards: [
+          {
+            items_page: {
+              cursor: "repeat-cursor",
+              items: [{ id: "d1", name: "Deal A", column_values: [] }],
+            },
+          },
+        ],
+      },
+    }),
+  })) as unknown as typeof fetch;
+
+  try {
+    await assert.rejects(
+      () => fetchDealsBoard({ apiToken: "token-123", dealsBoardId: "deals-board", workOrdersBoardId: "wo-board" }),
+      (error: unknown) => error instanceof Error && /pagination loop|same cursor|monday/i.test(error.message),
+    );
+  } finally {
+    globalThis.fetch = previousFetch;
   }
 });
 

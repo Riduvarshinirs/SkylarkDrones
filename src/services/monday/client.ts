@@ -192,8 +192,20 @@ async function fetchBoard(
 ): Promise<MondayBoardData> {
   let cursor: string | null = null;
   const items: MondayItem[] = [];
+  const seenCursors = new Set<string>();
 
   do {
+    if (cursor && seenCursors.has(cursor)) {
+      throw new MondayApiError(
+        `monday.com pagination loop detected for board ${boardId}. The API returned the same cursor more than once.`,
+        500,
+      );
+    }
+
+    if (cursor) {
+      seenCursors.add(cursor);
+    }
+
     const page = await fetchBoardPage(config, boardId, boardName, cursor);
     items.push(...page.items);
     cursor = page.nextCursor;
