@@ -1,21 +1,14 @@
 /**
  * monday.com API service layer.
  *
- * STATUS: Not yet implemented (scaffolded in this stage).
- * This module will be responsible for:
- *   - authenticating against the monday.com GraphQL API using
- *     MONDAY_API_TOKEN
- *   - fetching all items from the Work Orders and Deals boards
- *     (MONDAY_WORK_ORDERS_BOARD_ID / MONDAY_DEALS_BOARD_ID)
- *   - paginating through large boards
- *   - handling and classifying API errors (auth, rate limit, network,
- *     malformed response) without crashing the app
- *
- * Nothing in this file should ever run in the browser - it is imported
- * only from server-side code (API routes / server actions).
+ * This module is the server-side boundary to monday.com. It validates the
+ * required environment settings, calls the monday.com GraphQL API with
+ * pagination, and transforms the raw response into the app's typed board data.
  */
 
-import type { MondayBoardData } from "@/types/domain";
+import type { MondayBoardData, MondayColumnValue, MondayItem } from "@/types/domain";
+
+const MONDAY_GRAPHQL_URL = "https://api.monday.com/v2";
 
 export class MondayConfigError extends Error {
   constructor(message: string) {
@@ -40,12 +33,6 @@ export interface MondayClientConfig {
   workOrdersBoardId: string;
 }
 
-/**
- * Reads and validates the monday.com configuration from environment
- * variables. Throws MondayConfigError with a user-facing message when
- * something required is missing, rather than allowing the app to fall
- * back to fake data.
- */
 export function getMondayConfig(): MondayClientConfig {
   const apiToken = process.env.MONDAY_API_TOKEN;
   const dealsBoardId = process.env.MONDAY_DEALS_BOARD_ID;
@@ -58,41 +45,180 @@ export function getMondayConfig(): MondayClientConfig {
 
   if (missing.length > 0) {
     throw new MondayConfigError(
-      `Missing required environment variable(s): ${missing.join(", ")}`,
+      `Missing required environment variable(s): ${missing.join(", ")}. Set them on the server before using live monday.com data.`,
     );
   }
 
+  const resolvedApiToken = String(apiToken).trim();
+  const resolvedDealsBoardId = String(dealsBoardId).trim();
+  const resolvedWorkOrdersBoardId = String(workOrdersBoardId).trim();
+
   return {
-    apiToken: apiToken!,
-    dealsBoardId: dealsBoardId!,
-    workOrdersBoardId: workOrdersBoardId!,
+    apiToken: resolvedApiToken,
+    dealsBoardId: resolvedDealsBoardId,
+    workOrdersBoardId: resolvedWorkOrdersBoardId,
   };
 }
 
-/**
- * Fetches all items from the configured Deals board.
- * TODO(next stage): implement GraphQL query + pagination + error handling.
- */
+function safeExtractMessage(payload: unknown): string {
+  if (!payload || typeof payload !== "object") return "The monday.com request failed.";
+
+  const candidate = payload as Record<string, unknown>;
+  if (typeof candidate.message === "string" && candidate.message.trim()) {
+    return candidate.message;
+  }
+
+  const errors = candidate.errors;
+  if (Array.isArray(errors) && errors.length > 0) {
+    const first = errors[0];
+    if (first && typeof first === "object" && "message" in first && typeof first.message === "string") {
+      return first.message;
+    }
+  }
+
+  return "The monday.com request failed.";
+}
+
+function mapColumnValue(raw: Record<string, unknown>): MondayColumnValue {
+  const value = typeof raw.value === "string" ? raw.value : null;
+  return {
+    id: typeof raw.id === "string" ? raw.id : "unknown",
+    text: typeof raw.text === "string" ? raw.text : null,
+    value,
+    type: typeof raw.type === "string" ? raw.type : undefined,
+  };
+}
+
+function mapBoardItem(raw: Record<string, unknown>): MondayItem {
+  const columnValues = Array.isArray(raw.column_values)
+    ? raw.column_values
+        .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object")
+        .map(mapColumnValue)
+    : [];
+
+  return {
+    id: typeof raw.id === "string" ? raw.id : String(raw.id ?? ""),
+    name: typeof raw.name === "string" ? raw.name : "",
+    column_values: columnValues,
+  };
+}
+
+async function fetchBoardPage(
+  config: MondayClientConfig,
+  boardId: string,
+  boardName: string,
+  cursor: string | null,
+): Promise<{ boardId: string; boardName: string; items: MondayItem[]; nextCursor: string | null }> {
+  const query = `
+    query BoardItems($boardId: ID!, $cursor: String) {
+      boards(ids: [$boardId]) {
+        id
+        name
+        items_page(limit: 500, cursor: $cursor) {
+          cursor
+          items {
+            id
+            name
+            column_values {
+              id
+              text
+              value
+              type
+            }
+          }
+        }
+      }
+    }
+  `;
+
+  const response = await fetch(MONDAY_GRAPHQL_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${config.apiToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      query,
+      variables: { boardId, cursor },
+    }),
+  });
+
+  if (!response.ok) {
+    let payload: unknown = null;
+    try {
+      payload = await response.json();
+    } catch {
+      // Response body may be empty; the HTTP status already tells us the failure.
+    }
+    const message = safeExtractMessage(payload).replace(/\s+/g, " ").trim();
+    throw new MondayApiError(
+      `monday.com API request failed for board ${boardId}: ${message}`,
+      response.status,
+    );
+  }
+
+  const payload = (await response.json()) as { data?: { boards?: Array<Record<string, unknown>> } };
+  const board = Array.isArray(payload.data?.boards)
+    ? payload.data.boards[0]
+    : undefined;
+
+  if (!board) {
+    throw new MondayApiError(
+      `monday.com returned no board data for board ${boardId}. Check the board ID and permission scope.`,
+      404,
+    );
+  }
+
+  const page = board.items_page as Record<string, unknown> | undefined;
+  const items = Array.isArray(page?.items)
+    ? page.items
+        .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object")
+        .map(mapBoardItem)
+    : [];
+
+  const nextCursor = typeof page?.cursor === "string" ? page.cursor : null;
+  return {
+    boardId,
+    boardName: typeof board.name === "string" ? board.name : boardName,
+    items,
+    nextCursor,
+  };
+}
+
+async function fetchBoard(
+  config: MondayClientConfig,
+  boardId: string,
+  boardName: string,
+): Promise<MondayBoardData> {
+  let cursor: string | null = null;
+  const items: MondayItem[] = [];
+
+  do {
+    const page = await fetchBoardPage(config, boardId, boardName, cursor);
+    items.push(...page.items);
+    cursor = page.nextCursor;
+  } while (cursor);
+
+  return {
+    boardId,
+    boardName,
+    items,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
 export async function fetchDealsBoard(
-  _config: MondayClientConfig,
+  config: MondayClientConfig,
 ): Promise<MondayBoardData> {
-  throw new Error("fetchDealsBoard is not implemented yet");
+  return fetchBoard(config, config.dealsBoardId, "Deals");
 }
 
-/**
- * Fetches all items from the configured Work Orders board.
- * TODO(next stage): implement GraphQL query + pagination + error handling.
- */
 export async function fetchWorkOrdersBoard(
-  _config: MondayClientConfig,
+  config: MondayClientConfig,
 ): Promise<MondayBoardData> {
-  throw new Error("fetchWorkOrdersBoard is not implemented yet");
+  return fetchBoard(config, config.workOrdersBoardId, "Work Orders");
 }
 
-/**
- * Reports whether the monday.com integration is configured, without
- * making a network call. Used by the UI to show a setup/config state.
- */
 export function isMondayConfigured(): boolean {
   try {
     getMondayConfig();

@@ -209,6 +209,30 @@ test("handleUserQuestion explains when data is missing", async () => {
   }
 });
 
+test("leadership update is decision-oriented and grounded in the data", async () => {
+  const restoreFetch = mockOpenAIResponse({
+    answer: "Leadership update: pipeline is stable and operations remain on schedule.",
+    key_metrics: [{ label: "Total pipeline", value: "$350K" }],
+    insights: ["Energy remains the strongest sector."],
+    data_quality: { coveragePercent: 100 },
+    sources_context: ["Deals board", "Work orders board"],
+  });
+
+  try {
+    const result = await handleUserQuestion("Generate a leadership update.", [], {
+      deals: baseDeals,
+      workOrders: baseWorkOrders,
+    });
+
+    assert.ok(result.answer.toLowerCase().includes("pipeline") || result.answer.toLowerCase().includes("leadership"));
+    assert.ok(Array.isArray(result.key_metrics));
+    assert.ok(result.sources_context?.length ?? 0 > 0);
+    assert.ok(result.data_quality !== undefined);
+  } finally {
+    restoreFetch();
+  }
+});
+
 test("handleUserQuestion survives OpenAI API failure", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {

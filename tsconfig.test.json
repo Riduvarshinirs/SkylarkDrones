@@ -9,5 +9,12 @@
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["src/types/domain.ts", "src/services/data/normalize.ts", "src/services/data/normalize.test.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.test.ts"
+  ],
+  "exclude": [
+    ".next",
+    "node_modules"
+  ]
 }

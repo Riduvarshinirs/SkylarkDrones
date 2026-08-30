@@ -12,6 +12,23 @@ export interface EntryData {
     answer?: string;
     key_metrics?: Array<{ label: string; value: string; detail?: string }>;
     insights?: string[];
+    leadership_update?: {
+      business_snapshot: string;
+      commercial_pipeline: string;
+      revenue_signals: string;
+      operational_position: string;
+      positive_trends: string[];
+      key_risks: string[];
+      data_quality_caveats: string[];
+      leadership_attention: string[];
+    };
+    analysis_details?: {
+      dataSources?: string[];
+      filters?: string[];
+      recordsAnalyzed?: number;
+      recordsExcluded?: number;
+      reason?: string[];
+    };
     data_quality?: Record<string, unknown>;
     sources_context?: string[];
     kpis?: Array<{ label: string; value: string; sublabel?: string }>;
@@ -66,8 +83,23 @@ export function MessageEntry({ entry }: { entry: EntryData }) {
   const recordsConsidered = toNumber(quality.recordsConsidered) ?? 0;
   const recordsExcluded = toNumber(quality.recordsExcluded) ?? 0;
   const caveats = Array.isArray(quality.caveats) ? (quality.caveats as string[]) : [];
+  const analysisDetails = response?.analysis_details ?? undefined;
   const insights = response?.insights ?? [];
-  const metrics = response?.key_metrics ?? response?.kpis ?? [];
+  const leadershipUpdate = response?.leadership_update;
+  const metrics = (response?.key_metrics ?? response?.kpis ?? []).map((metric) => {
+    const detail =
+      "detail" in metric && typeof metric.detail === "string"
+        ? metric.detail
+        : "sublabel" in metric && typeof metric.sublabel === "string"
+          ? metric.sublabel
+          : undefined;
+
+    return {
+      label: metric.label,
+      value: metric.value,
+      detail,
+    };
+  });
 
   return (
     <article className="rise-in overflow-hidden rounded-2xl border border-line bg-panel shadow-[0_8px_24px_rgba(20,24,31,0.04)]">
@@ -170,6 +202,72 @@ export function MessageEntry({ entry }: { entry: EntryData }) {
               </section>
             )}
 
+            {leadershipUpdate && (
+              <section className="rounded-xl border border-line bg-panel-raised p-4">
+                <div className="mb-4 font-mono text-[0.68rem] uppercase tracking-[0.12em] text-graphite-soft">
+                  Leadership update
+                </div>
+                <div className="space-y-4 text-[0.9rem] leading-6 text-ink">
+                  <div>
+                    <div className="mb-1 font-medium text-ink">Business snapshot</div>
+                    <p>{leadershipUpdate.business_snapshot}</p>
+                  </div>
+                  <div>
+                    <div className="mb-1 font-medium text-ink">Commercial / pipeline position</div>
+                    <p>{leadershipUpdate.commercial_pipeline}</p>
+                  </div>
+                  <div>
+                    <div className="mb-1 font-medium text-ink">Revenue signals</div>
+                    <p>{leadershipUpdate.revenue_signals}</p>
+                  </div>
+                  <div>
+                    <div className="mb-1 font-medium text-ink">Operational position</div>
+                    <p>{leadershipUpdate.operational_position}</p>
+                  </div>
+                  {leadershipUpdate.positive_trends.length > 0 && (
+                    <div>
+                      <div className="mb-1 font-medium text-ink">Positive trends</div>
+                      <ul className="list-disc space-y-1 pl-5">
+                        {leadershipUpdate.positive_trends.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {leadershipUpdate.key_risks.length > 0 && (
+                    <div>
+                      <div className="mb-1 font-medium text-ink">Key risks</div>
+                      <ul className="list-disc space-y-1 pl-5">
+                        {leadershipUpdate.key_risks.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {leadershipUpdate.data_quality_caveats.length > 0 && (
+                    <div>
+                      <div className="mb-1 font-medium text-ink">Data-quality caveats</div>
+                      <ul className="list-disc space-y-1 pl-5">
+                        {leadershipUpdate.data_quality_caveats.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                  {leadershipUpdate.leadership_attention.length > 0 && (
+                    <div>
+                      <div className="mb-1 font-medium text-ink">Leadership attention</div>
+                      <ul className="list-disc space-y-1 pl-5">
+                        {leadershipUpdate.leadership_attention.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
             {response?.table && renderTable(response.table)}
 
             {(coverage > 0 || recordsConsidered > 0 || recordsExcluded > 0 || caveats.length > 0) && (
@@ -179,7 +277,7 @@ export function MessageEntry({ entry }: { entry: EntryData }) {
                     Data quality
                   </div>
                   <div className="font-mono text-[0.68rem] text-graphite">
-                    Coverage {coverage.toFixed(1)}%
+                    {coverage.toFixed(0)}%
                   </div>
                 </div>
                 <div className="grid gap-3 sm:grid-cols-3">
@@ -193,7 +291,7 @@ export function MessageEntry({ entry }: { entry: EntryData }) {
                   </div>
                   <div className="rounded-lg border border-line bg-panel p-3">
                     <div className="font-mono text-[0.66rem] uppercase tracking-[0.08em] text-graphite-soft">Coverage</div>
-                    <div className="mt-1 text-base font-semibold text-ink">{coverage.toFixed(1)}%</div>
+                    <div className="mt-1 text-base font-semibold text-ink">{coverage.toFixed(0)}%</div>
                   </div>
                 </div>
                 {caveats.length > 0 && (
@@ -207,6 +305,46 @@ export function MessageEntry({ entry }: { entry: EntryData }) {
                   </ul>
                 )}
               </section>
+            )}
+
+            {analysisDetails && (
+              <details className="rounded-xl border border-line bg-panel-raised p-4">
+                <summary className="cursor-pointer list-none font-mono text-[0.68rem] uppercase tracking-[0.12em] text-graphite-soft">
+                  Analysis details
+                </summary>
+                <div className="mt-4 space-y-4 text-[0.82rem] text-graphite">
+                  <div>
+                    <div className="mb-1 font-medium text-ink">Data sources</div>
+                    <div className="flex flex-wrap gap-2">
+                      {analysisDetails.dataSources.map((source) => (
+                        <span key={source} className="rounded-full border border-line bg-panel px-2 py-1 font-mono text-[0.62rem] uppercase tracking-[0.08em] text-graphite">{source}</span>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-1 font-medium text-ink">Filters</div>
+                    <div>{analysisDetails.filters.join(", ")}</div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-lg border border-line bg-panel p-3">
+                      <div className="font-mono text-[0.62rem] uppercase tracking-[0.08em] text-graphite-soft">Records analyzed</div>
+                      <div className="mt-1 text-lg font-semibold text-ink">{analysisDetails.recordsAnalyzed}</div>
+                    </div>
+                    <div className="rounded-lg border border-line bg-panel p-3">
+                      <div className="font-mono text-[0.62rem] uppercase tracking-[0.08em] text-graphite-soft">Records excluded</div>
+                      <div className="mt-1 text-lg font-semibold text-ink">{analysisDetails.recordsExcluded}</div>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="mb-1 font-medium text-ink">Reason</div>
+                    <ul className="list-disc space-y-1 pl-5">
+                      {analysisDetails.reason.map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </details>
             )}
 
             {(response?.sources_context?.length ?? 0) > 0 && (

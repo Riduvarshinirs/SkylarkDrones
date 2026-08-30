@@ -693,14 +693,61 @@ export function generateLeadershipUpdateData(
 ): AnalyticsResult {
   const pipeline = getPipelineSummary(deals, { rawQuestion: "leadership summary", type: "leadership_summary" });
   const operations = getOperationalSummary(workOrders, { rawQuestion: "leadership summary", type: "leadership_summary" });
+  const risk = getRiskSummary(deals, workOrders, { rawQuestion: "leadership summary", type: "leadership_summary" });
+
+  const pipelineData = pipeline.data as Record<string, unknown>;
+  const operationsData = operations.data as Record<string, unknown>;
+  const riskData = risk.data as Record<string, unknown>;
+
+  const pipelineValue = typeof pipelineData.totalPipelineValue === "number" ? pipelineData.totalPipelineValue : null;
+  const weightedPipelineValue = typeof pipelineData.weightedPipelineValue === "number" ? pipelineData.weightedPipelineValue : null;
+  const completionRate = typeof operationsData.completionRate === "number" ? operationsData.completionRate : null;
+  const delayedOrders = typeof operationsData.delayedWorkOrders === "number" ? operationsData.delayedWorkOrders : 0;
+  const atRiskDeals = typeof riskData.atRiskDeals === "number" ? riskData.atRiskDeals : 0;
+
+  const positiveTrends: string[] = [];
+  if (pipelineValue !== null) positiveTrends.push(`Pipeline value is ${formatCurrencyForNarrative(pipelineValue)}.`);
+  if (completionRate !== null) positiveTrends.push(`Operational completion rate is ${formatPercentNarrative(completionRate)}.`);
+  if (delayedOrders === 0) positiveTrends.push("No delayed work orders were identified in the current scope.");
+  if (atRiskDeals === 0) positiveTrends.push("No deal-level risk flags were identified in the current scope.");
+
+  const keyRisks: string[] = [];
+  if (delayedOrders > 0) keyRisks.push(`${delayedOrders} work order${delayedOrders === 1 ? "" : "s"} are delayed or blocked.`);
+  if (atRiskDeals > 0) keyRisks.push(`${atRiskDeals} deal${atRiskDeals === 1 ? "" : "s"} are flagged as at risk.`);
+  if (pipelineValue === null) keyRisks.push("Pipeline value is unavailable because the data has insufficient valid deal values.");
+  if (completionRate === null) keyRisks.push("Operational completion rate is unavailable because execution status data is insufficient.");
+
+  const qualityCaveats = [
+    "Any metric reported here is limited to the normalized records that contain valid values.",
+    "Missing or malformed source values are not inferred or reconstructed.",
+  ];
+
+  const leadershipAttention: string[] = [];
+  if (delayedOrders > 0) leadershipAttention.push("Review the delayed work-order queue and clear blockers before they expand into delivery risk.");
+  if (atRiskDeals > 0) leadershipAttention.push("Prioritize the at-risk deals and confirm commercial decisions or dates before the next review cycle.");
+  if (pipelineValue === null) leadershipAttention.push("Strengthen the data capture for deal values and close dates so leadership reporting stays reliable.");
+  if (leadershipAttention.length === 0) leadershipAttention.push("Maintain current execution discipline and continue monitoring the operating plan for variance.");
 
   const leadData = {
     pipelineSummary: pipeline.data,
     operationalSummary: operations.data,
-    topTakeaways: [
-      `Pipeline value: ${pipeline.data.totalPipelineValue ?? "not available"}`,
-      `Operational completion rate: ${operations.data.completionRate ?? "not available"}`,
-    ],
+    riskSummary: risk.data,
+    business_snapshot: pipelineValue !== null
+      ? `Pipeline coverage stands at ${formatCurrencyForNarrative(pipelineValue)} across ${pipeline.data.numberOfDeals ?? 0} relevant deal${(pipeline.data.numberOfDeals ?? 0) === 1 ? "" : "s"}.`
+      : "Pipeline coverage is unavailable because the underlying deal values are not reliable enough for a current snapshot.",
+    commercial_pipeline: weightedPipelineValue !== null
+      ? `Weighted pipeline is ${formatCurrencyForNarrative(weightedPipelineValue)} after accounting for probability, which is a more realistic view of near-term conversion potential.`
+      : "Weighted pipeline is unavailable because the probability data is missing or invalid.",
+    revenue_signals: pipelineValue !== null
+      ? `Revenue signal is based on ${formatCurrencyForNarrative(pipelineValue)} in recognized deal value and ${weightedPipelineValue !== null ? formatCurrencyForNarrative(weightedPipelineValue) : "not available"} in probability-adjusted value.`
+      : "Revenue signal is unavailable because valid deal values are not present in the current dataset.",
+    operational_position: completionRate !== null
+      ? `Operational completion rate is ${formatPercentNarrative(completionRate)} with ${delayedOrders} delayed work order${delayedOrders === 1 ? "" : "s"} in scope.`
+      : "Operational position is unavailable because the execution-status data needed for a completion rate is insufficient.",
+    positive_trends: positiveTrends,
+    key_risks: keyRisks,
+    data_quality_caveats: qualityCaveats,
+    leadership_attention: leadershipAttention,
     assumptions: [
       "Leadership update is built from the same deterministic calculations used elsewhere in the analytics layer.",
     ],
@@ -716,11 +763,19 @@ export function generateLeadershipUpdateData(
       deals.length + workOrders.length,
       deals.length + workOrders.length,
       { ...getIssueCounts(deals), ...getIssueCounts(workOrders) },
-      ["Leadership summary is a normalised aggregate of the available operational and pipeline data."],
+      qualityCaveats,
     ),
     generatedAt: new Date().toISOString(),
     sourceBoards: ["deals", "work_orders"],
   };
+}
+
+function formatCurrencyForNarrative(value: number): string {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
+function formatPercentNarrative(value: number): string {
+  return `${Number(value).toFixed(1)}%`;
 }
 
 export function getWorkOrderSummary(

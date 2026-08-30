@@ -243,6 +243,25 @@ export interface AgentMetric {
   detail?: string;
 }
 
+export interface LeadershipUpdate {
+  business_snapshot: string;
+  commercial_pipeline: string;
+  revenue_signals: string;
+  operational_position: string;
+  positive_trends: string[];
+  key_risks: string[];
+  data_quality_caveats: string[];
+  leadership_attention: string[];
+}
+
+export interface AnalysisDetails {
+  dataSources: string[];
+  filters: string[];
+  recordsAnalyzed: number;
+  recordsExcluded: number;
+  reason: string[];
+}
+
 export interface AgentResponse {
   answer: string;
   insight?: string;
@@ -250,6 +269,8 @@ export interface AgentResponse {
   insights?: string[];
   kpis?: KpiCardData[];
   table?: TableData;
+  leadership_update?: LeadershipUpdate;
+  analysis_details?: AnalysisDetails;
   data_quality?: DataQualityReport | Record<string, unknown>;
   dataQuality?: DataQualityReport;
   caveats?: string[];

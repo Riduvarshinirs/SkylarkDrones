@@ -11,6 +11,7 @@
 
 import type {
   AgentResponse,
+  AnalysisDetails,
   AnalyticsResult,
   ChatMessage,
   NormalizedDeal,
@@ -20,6 +21,7 @@ import type {
 } from "@/types/domain";
 
 import {
+  generateLeadershipUpdateData,
   getCustomerSummary,
   getDataQualityReport,
   getOperationalSummary,
@@ -276,11 +278,49 @@ function formatPercent(value: number | null | undefined): string {
   return `${Number(value).toFixed(1)}%`;
 }
 
-function buildFallbackResponse(question: string, intent: QueryIntent, analyticsResult: AnalyticsResult | null): AgentResponse {
+function buildAnalysisDetails(
+  intent: QueryIntent,
+  analyticsResult: AnalyticsResult | null,
+  sourceDeals: NormalizedDeal[],
+  sourceWorkOrders: NormalizedWorkOrder[],
+): AnalysisDetails | undefined {
+  const dataSources = ["Deals"];
+  if (sourceWorkOrders.length > 0 || analyticsResult?.sourceBoards?.includes("work_orders")) {
+    dataSources.push("Work Orders");
+  }
+
+  const filters: string[] = [];
+  if (intent.timePeriod?.label) {
+    filters.push(intent.timePeriod.label.replace(/_/g, " "));
+  }
+  if (intent.sector) {
+    filters.push(`Sector: ${intent.sector}`);
+  }
+  if (intent.customer) {
+    filters.push(`Customer: ${intent.customer}`);
+  }
+
+  const recordsConsidered = analyticsResult?.dataQuality?.recordsConsidered ?? sourceDeals.length + sourceWorkOrders.length;
+  const recordsExcluded = analyticsResult?.dataQuality?.recordsExcluded ?? 0;
+  const reasons = analyticsResult?.dataQuality?.caveats && analyticsResult.dataQuality.caveats.length > 0
+    ? analyticsResult.dataQuality.caveats
+    : ["Data quality limitations are reported explicitly; values are never inferred without support."];
+
+  return {
+    dataSources,
+    filters: filters.length > 0 ? filters : ["No additional filters"],
+    recordsAnalyzed: recordsConsidered,
+    recordsExcluded,
+    reason: reasons,
+  };
+}
+
+function buildFallbackResponse(question: string, intent: QueryIntent, analyticsResult: AnalyticsResult | null, sourceDeals: NormalizedDeal[], sourceWorkOrders: NormalizedWorkOrder[]): AgentResponse {
   const empty = {
     answer: "I do not have enough reliable data to answer that confidently.",
     key_metrics: [],
     insights: ["The current dataset does not contain enough usable information for a trustworthy answer."],
+    analysis_details: buildAnalysisDetails(intent, analyticsResult, sourceDeals, sourceWorkOrders),
     data_quality: { coveragePercent: 0, caveats: ["Source coverage is insufficient."], recordsConsidered: 0, recordsExcluded: 0, exclusionReasons: {} },
     sources_context: ["No usable source data"],
   };
@@ -358,6 +398,7 @@ function buildFallbackResponse(question: string, intent: QueryIntent, analyticsR
     answer: answerBase,
     key_metrics: metrics,
     insights: insights.length > 0 ? insights : ["This answer was generated from deterministic calculations only."],
+    analysis_details: buildAnalysisDetails(intent, analyticsResult, sourceDeals, sourceWorkOrders),
     data_quality: analyticsResult.dataQuality ?? { coveragePercent: 0 },
     sources_context: analyticsResult.sourceBoards ?? ["analytics layer"],
   };
@@ -382,6 +423,50 @@ function inferSector(text: string): string | undefined {
 function inferCustomer(text: string): string | undefined {
   const match = text.match(/for\s+([a-z0-9\-\s]+?)(?:\?|$|\.)/i);
   return match ? match[1].trim() : undefined;
+}
+
+function normalizeLeadershipUpdate(value: unknown): AgentResponse["leadership_update"] | undefined {
+  if (typeof value !== "object" || value === null) {
+    return undefined;
+  }
+
+  const candidate = value as Partial<{
+    business_snapshot: unknown;
+    commercial_pipeline: unknown;
+    revenue_signals: unknown;
+    operational_position: unknown;
+    positive_trends: unknown;
+    key_risks: unknown;
+    data_quality_caveats: unknown;
+    leadership_attention: unknown;
+  }>;
+
+  const requiredStrings = [
+    candidate.business_snapshot,
+    candidate.commercial_pipeline,
+    candidate.revenue_signals,
+    candidate.operational_position,
+  ];
+
+  if (requiredStrings.some((item) => typeof item !== "string")) {
+    return undefined;
+  }
+
+  const positiveTrends = Array.isArray(candidate.positive_trends) ? candidate.positive_trends.filter((item): item is string => typeof item === "string") : [];
+  const keyRisks = Array.isArray(candidate.key_risks) ? candidate.key_risks.filter((item): item is string => typeof item === "string") : [];
+  const caveats = Array.isArray(candidate.data_quality_caveats) ? candidate.data_quality_caveats.filter((item): item is string => typeof item === "string") : [];
+  const attention = Array.isArray(candidate.leadership_attention) ? candidate.leadership_attention.filter((item): item is string => typeof item === "string") : [];
+
+  return {
+    business_snapshot: candidate.business_snapshot as string,
+    commercial_pipeline: candidate.commercial_pipeline as string,
+    revenue_signals: candidate.revenue_signals as string,
+    operational_position: candidate.operational_position as string,
+    positive_trends: positiveTrends,
+    key_risks: keyRisks,
+    data_quality_caveats: caveats,
+    leadership_attention: attention,
+  };
 }
 
 export async function handleUserQuestion(
@@ -456,7 +541,7 @@ export async function handleUserQuestion(
       break;
   }
 
-  const fallback = buildFallbackResponse(question, intent, analyticsResult);
+  const fallback = buildFallbackResponse(question, intent, analyticsResult, sourceDeals, sourceWorkOrders);
 
   if (!analyticsResult || !(sourceDeals.length || sourceWorkOrders.length)) {
     return {
@@ -473,10 +558,35 @@ export async function handleUserQuestion(
   });
 
   if (structured && structured.answer) {
+    const leadershipUpdate =
+      intent.type === "leadership_summary" && typeof structured === "object" && structured !== null && "leadership_update" in structured
+        ? normalizeLeadershipUpdate(structured.leadership_update)
+        : undefined;
+
+    const normalizedLead = leadershipUpdate ??
+      (intent.type === "leadership_summary"
+        ? normalizeLeadershipUpdate(generateLeadershipUpdateData(sourceDeals, sourceWorkOrders).data)
+        : undefined);
+
     return {
       ...structured,
+      leadership_update: normalizedLead,
+      analysis_details: structured.analysis_details ?? buildAnalysisDetails(intent, analyticsResult, sourceDeals, sourceWorkOrders),
       data_quality: structured.data_quality ?? analyticsResult.dataQuality,
       sources_context: structured.sources_context ?? analyticsResult.sourceBoards,
+    };
+  }
+
+  if (intent.type === "leadership_summary") {
+    const leadershipUpdate = normalizeLeadershipUpdate(generateLeadershipUpdateData(sourceDeals, sourceWorkOrders).data);
+    return {
+      answer: `Leadership update: ${String(leadershipUpdate?.business_snapshot ?? "Current business conditions are being tracked with available source data.")}`,
+      key_metrics: [],
+      insights: Array.isArray(leadershipUpdate?.positive_trends) ? leadershipUpdate.positive_trends : [],
+      leadership_update: leadershipUpdate,
+      analysis_details: buildAnalysisDetails(intent, analyticsResult, sourceDeals, sourceWorkOrders),
+      data_quality: analyticsResult.dataQuality,
+      sources_context: analyticsResult.sourceBoards,
     };
   }
 
