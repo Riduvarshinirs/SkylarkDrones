@@ -739,9 +739,9 @@ export function getOperationsIntelligenceSummary(
       return (order[b.riskLevel] ?? 0) - (order[a.riskLevel] ?? 0) || (b.riskScore ?? 0) - (a.riskScore ?? 0);
     });
 
-  const highRisk = allAssessmentItems.filter((item) => item.riskLevel === "High").length;
-  const mediumRisk = allAssessmentItems.filter((item) => item.riskLevel === "Medium").length;
-  const lowRisk = allAssessmentItems.filter((item) => item.riskLevel === "Low").length;
+  const highRisk = riskItems.filter((item) => item.riskLevel === "High").length;
+  const mediumRisk = riskItems.filter((item) => item.riskLevel === "Medium").length;
+  const lowRisk = 0;
 
   const statusSummary = {
     completed: data.completedWorkOrders,
@@ -982,7 +982,7 @@ export function generateLeadershipUpdateData(
       weightedPipelineValue: weightedPipelineValue !== null ? formatCurrencyForNarrative(weightedPipelineValue) : "N/A",
     },
     operations: {
-      totalWorkOrders: operations.data.totalWorkOrders ?? 0,
+      totalWorkOrders: typeof operationsData.totalWorkOrders === "number" ? operationsData.totalWorkOrders : workOrders.length,
       completionRate: completionRate !== null ? `${Number(completionRate).toFixed(1)}%` : "N/A",
       ongoingWorkOrders: typeof operationsData.ongoingWorkOrders === "number" ? operationsData.ongoingWorkOrders : 0,
       atRiskWorkOrders: delayedOrders,

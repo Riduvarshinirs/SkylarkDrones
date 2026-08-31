@@ -401,6 +401,7 @@ function buildFallbackResponse(question: string, intent: QueryIntent, analyticsR
     analysis_details: buildAnalysisDetails(intent, analyticsResult, sourceDeals, sourceWorkOrders),
     data_quality: { coveragePercent: 0, caveats: ["Source coverage is insufficient."], recordsConsidered: 0, recordsExcluded: 0, exclusionReasons: {} },
     sources_context: ["No usable source data"],
+    follow_up_suggestions: ["How is our pipeline looking?", "What work orders are at risk?"],
   };
 
   if (!analyticsResult) {
@@ -524,6 +525,7 @@ function buildFallbackResponse(question: string, intent: QueryIntent, analyticsR
     analysis_details: buildAnalysisDetails(intent, analyticsResult, sourceDeals, sourceWorkOrders),
     data_quality: analyticsResult.dataQuality ?? { coveragePercent: 0 },
     sources_context: analyticsResult.sourceBoards ?? ["analytics layer"],
+    follow_up_suggestions: ["How is our pipeline looking?", "What work orders are at risk?"],
   };
 }
 
@@ -598,6 +600,19 @@ export async function handleUserQuestion(
   providedData?: { deals?: NormalizedDeal[]; workOrders?: NormalizedWorkOrder[] },
 ): Promise<AgentResponse> {
   const intent = classifyQuestion(question);
+
+  if (intent.type === "unsupported") {
+    const followUpSuggestions = ["How is our pipeline looking?", "What work orders are at risk?", "Generate a leadership update"];
+    return {
+      answer: `I can only analyze sales and work-order data available in the Monday boards. "${question}" is not part of this dataset, so the metric is not available.`,
+      key_metrics: [],
+      insights: ["This request falls outside the data available in the current Deals and Work Orders sources."],
+      data_quality: { coveragePercent: 0, caveats: ["The requested metric is unavailable because it is outside the supported data model."], recordsConsidered: 0, recordsExcluded: 0, exclusionReasons: {} },
+      sources_context: ["Deals", "Work Orders"],
+      follow_up_suggestions: followUpSuggestions,
+      clarificationNeeded: "The current monday.com data only includes deal pipeline and work-order operational data.",
+    };
+  }
 
   if (intent.type === "clarification_needed") {
     const unsupportedSubject = !/(pipeline|revenue|work order|deal|risk|sector|operational|performance|leadership|sales|operations)/i.test(question);
