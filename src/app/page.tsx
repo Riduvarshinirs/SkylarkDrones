@@ -1,5 +1,6 @@
 import { Header } from "@/components/layout/Header";
 import { ChatShell } from "@/components/chat/ChatShell";
+import { SalesIntelligence } from "@/components/dashboard/SalesIntelligence";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 
 export default function HomePage() {
@@ -8,6 +9,7 @@ export default function HomePage() {
       <Header />
       <main className="flex min-h-0 flex-1 flex-col">
         <ErrorBoundary>
+          <SalesIntelligence />
           <ChatShell />
         </ErrorBoundary>
       </main>

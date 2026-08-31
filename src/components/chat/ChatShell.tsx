@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { MessageEntry, type EntryData } from "@/components/chat/MessageEntry";
 import { MessageInput } from "@/components/chat/MessageInput";
 import { SuggestedQuestions } from "@/components/chat/SuggestedQuestions";
@@ -11,15 +11,86 @@ interface ChatApiErrorBody {
   code?: string;
 }
 
+interface ExecutiveKpiSnapshot {
+  totalPipeline: number | null;
+  openDeals: number | null;
+  winRate: number | null;
+  atRiskWorkOrders: number | null;
+  closedWon: number | null;
+  completionRate: number | null;
+  generatedAt: string;
+}
+
+function formatCurrency(value: number | null): string {
+  if (value === null || Number.isNaN(value)) return "N/A";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function formatPercentage(value: number | null): string {
+  if (value === null || Number.isNaN(value)) return "N/A";
+  return `${Number(value).toFixed(1)}%`;
+}
+
+function formatInteger(value: number | null): string {
+  if (value === null || Number.isNaN(value)) return "N/A";
+  return new Intl.NumberFormat("en-US").format(value);
+}
+
 export function ChatShell() {
   const [entries, setEntries] = useState<EntryData[]>([]);
   const [input, setInput] = useState("");
   const [isBusy, setIsBusy] = useState(false);
+  const [kpis, setKpis] = useState<ExecutiveKpiSnapshot | null>(null);
+  const [isKpisLoading, setIsKpisLoading] = useState(true);
+  const [kpiError, setKpiError] = useState<string | null>(null);
   const scrollAnchorRef = useRef<HTMLDivElement>(null);
+
+  const refreshKpis = useCallback(async () => {
+    setIsKpisLoading(true);
+    setKpiError(null);
+
+    try {
+      const res = await fetch("/api/exec-kpis", {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        const message = typeof data?.error === "string" ? data.error : "Unable to load KPI data.";
+        setKpis(null);
+        setKpiError(message);
+        return;
+      }
+
+      const data = (await res.json()) as { kpis?: ExecutiveKpiSnapshot | null };
+      setKpis(data.kpis ?? null);
+    } catch {
+      setKpis(null);
+      setKpiError("Could not load KPI data right now.");
+    } finally {
+      setIsKpisLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     scrollAnchorRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [entries]);
+
+  useEffect(() => {
+    void refreshKpis();
+    const intervalId = window.setInterval(() => {
+      void refreshKpis();
+    }, 60000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [refreshKpis]);
 
   async function submitQuestion(question: string) {
     const trimmed = question.trim();
@@ -91,9 +162,55 @@ export function ChatShell() {
 
   const isEmpty = entries.length === 0;
 
+  const kpiCards = [
+    { label: "TOTAL PIPELINE", value: formatCurrency(kpis?.totalPipeline ?? null), sublabel: "Total active pipeline value" },
+    { label: "OPEN DEALS", value: formatInteger(kpis?.openDeals ?? null), sublabel: "Active opportunities" },
+    { label: "WIN RATE", value: formatPercentage(kpis?.winRate ?? null), sublabel: "Closed won / lost" },
+    { label: "AT-RISK WORK ORDERS", value: formatInteger(kpis?.atRiskWorkOrders ?? null), sublabel: "Delayed or blocked" },
+    { label: "CLOSED WON", value: formatInteger(kpis?.closedWon ?? null), sublabel: "Closed deals" },
+    { label: "COMPLETION RATE", value: formatPercentage(kpis?.completionRate ?? null), sublabel: "Operational completion" },
+  ];
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="mx-auto flex w-full max-w-5xl flex-1 flex-col px-4 sm:px-6 lg:px-8">
+        <section aria-labelledby="executive-kpi-heading" aria-live="polite" className="pt-6 sm:pt-8">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <p className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-graphite-soft">
+              Executive KPI snapshot
+            </p>
+            {kpis && !kpiError ? (
+              <span className="font-mono text-[0.56rem] uppercase tracking-[0.12em] text-graphite-soft">
+                Updated {new Date(kpis.generatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
+              </span>
+            ) : null}
+          </div>
+
+          {kpiError ? (
+            <div className="rounded-xl border border-line bg-panel px-4 py-3 text-sm text-graphite">
+              {kpiError}
+            </div>
+          ) : (
+            <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              {kpiCards.map((card) => (
+                <div key={card.label} className="rounded-xl border border-line bg-panel px-4 py-3.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.02)]">
+                  <dt className="font-mono text-[0.62rem] uppercase tracking-[0.14em] text-graphite-soft">
+                    {card.label}
+                  </dt>
+                  <dd className="mt-3 font-display text-[1.6rem] font-semibold tracking-tight text-ink sm:text-[1.8rem]">
+                    {isKpisLoading ? (
+                      <span className="inline-block h-7 w-24 animate-pulse rounded-md bg-line/60" aria-label="Loading KPI value" />
+                    ) : (
+                      card.value
+                    )}
+                  </dd>
+                  <p className="mt-2 text-[0.72rem] text-graphite-soft">{card.sublabel}</p>
+                </div>
+              ))}
+            </dl>
+          )}
+        </section>
+
         {isEmpty ? (
           <div className="fade-in flex flex-1 flex-col justify-center py-10 sm:py-14 lg:py-18">
             <div className="mb-4 inline-flex w-fit items-center gap-2 rounded-full border border-line bg-panel px-3 py-1.5 font-mono text-[0.68rem] uppercase tracking-[0.12em] text-graphite-soft">

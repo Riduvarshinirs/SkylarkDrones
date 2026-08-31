@@ -67,20 +67,50 @@ function parseProbability(value: string | number | null | undefined): number | n
   return null;
 }
 
+function normalizeStatusText(status: string | null | undefined): string {
+  return (status ?? "").toLowerCase().replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
 function isClosedWon(status: string | null): boolean {
   if (!status) return false;
-  return ["won", "closed won", "closedwon"].includes(status.toLowerCase());
+  const lower = normalizeStatusText(status);
+  return ["won", "closed won", "closedwon", "closed-won", "closed_won"].includes(lower);
 }
 
 function isClosedLost(status: string | null): boolean {
   if (!status) return false;
-  return ["lost", "closed lost", "closedlost"].includes(status.toLowerCase());
+  const lower = normalizeStatusText(status);
+  return ["lost", "closed lost", "closedlost", "closed-lost", "closed_lost"].includes(lower);
 }
 
 function isOpenDeal(status: string | null): boolean {
   if (!status) return true;
-  const lower = status.toLowerCase();
-  return !isClosedWon(status) && !isClosedLost(status) && lower !== "completed";
+  const lower = normalizeStatusText(status);
+  return !isClosedWon(status) && !isClosedLost(status) && !["completed", "cancelled", "canceled", "archived"].includes(lower);
+}
+
+function isCompletedWorkOrder(status: string | null): boolean {
+  const lower = normalizeStatusText(status);
+  return ["completed", "complete", "done", "finished"].includes(lower);
+}
+
+function isOngoingWorkOrder(status: string | null): boolean {
+  const lower = normalizeStatusText(status);
+  return ["in progress", "inprogress", "ongoing", "started", "scheduled", "pending", "review", "open", "active", "delayed", "blocked", "at risk", "risk"].includes(lower);
+}
+
+function isNotStartedWorkOrder(status: string | null): boolean {
+  const lower = normalizeStatusText(status);
+  return ["not started", "notstarted", "new", "queued", "upcoming", "planned", "to do"].includes(lower);
+}
+
+function isDelayedWorkOrder(status: string | null, probableEndDate: string | null | undefined): boolean {
+  const lower = normalizeStatusText(status);
+  if (["delayed", "blocked", "at risk", "risk"].includes(lower)) return true;
+  if (probableEndDate && parseDate(probableEndDate) && parseDate(probableEndDate)! < new Date() && !isCompletedWorkOrder(status)) {
+    return true;
+  }
+  return false;
 }
 
 function sum(values: Array<number | null | undefined>): number {
@@ -117,7 +147,6 @@ function buildTimeRange(intent: QueryIntent | undefined, fallbackLabel: FilterKe
   const today = new Date();
   const nowYear = today.getFullYear();
   const nowMonth = today.getMonth();
-  const nowDate = today.getDate();
 
   if (intent?.timePeriod?.start || intent?.timePeriod?.end) {
     return {
@@ -209,6 +238,7 @@ function getIssueCounts(records: Array<{ qualityFlags: DataQualityIssue[] }>): P
 }
 
 function filterDealsByTimeRange(deals: NormalizedDeal[], intent?: QueryIntent): NormalizedDeal[] {
+  if (!intent?.timePeriod) return deals;
   const range = buildTimeRange(intent, "this_year");
   if (!range.start || !range.end) return deals;
 
@@ -258,13 +288,17 @@ export function getPipelineSummary(
 ): AnalyticsResult {
   const relevantDeals = filterDealsByTimeRange(deals, intent);
   const totalDeals = relevantDeals.length;
-  const openDeals = relevantDeals.filter((deal) => isOpenDeal(deal.dealStatus)).length;
-  const wonDeals = relevantDeals.filter((deal) => isClosedWon(deal.dealStatus)).length;
-  const lostDeals = relevantDeals.filter((deal) => isClosedLost(deal.dealStatus)).length;
-  const values = relevantDeals.map((deal) => toNumber(deal.dealValue)).filter((value): value is number => value !== null);
-  const totalPipelineValue = sum(values);
+  const openDeals = relevantDeals.filter((deal) => isOpenDeal(deal.dealStatus));
+  const wonDeals = relevantDeals.filter((deal) => isClosedWon(deal.dealStatus));
+  const lostDeals = relevantDeals.filter((deal) => isClosedLost(deal.dealStatus));
 
-  const weighted = relevantDeals
+  const values = openDeals.map((deal) => toNumber(deal.dealValue)).filter((value): value is number => value !== null);
+  const wonValues = wonDeals.map((deal) => toNumber(deal.dealValue)).filter((value): value is number => value !== null);
+  const lostValues = lostDeals.map((deal) => toNumber(deal.dealValue)).filter((value): value is number => value !== null);
+  const activePipelineValue = values.length > 0 ? sum(values) : null;
+  const closedWonValue = wonValues.length > 0 ? sum(wonValues) : null;
+  const closedLostValue = lostValues.length > 0 ? sum(lostValues) : null;
+  const weighted = openDeals
     .map((deal) => {
       const value = toNumber(deal.dealValue);
       if (value === null) return null;
@@ -273,12 +307,16 @@ export function getPipelineSummary(
       return value * probability;
     })
     .filter((value): value is number => value !== null);
-  const weightedPipelineValue = sum(weighted);
+  const weightedPipelineValue = weighted.length > 0 ? sum(weighted) : null;
 
-  const averageDealValue = values.length > 0 ? totalPipelineValue / values.length : null;
-  const winRate = wonDeals + lostDeals > 0 ? (wonDeals / (wonDeals + lostDeals)) * 100 : null;
+  const averageDealValue = values.length > 0 && activePipelineValue !== null ? activePipelineValue / values.length : null;
+  const winRate = wonDeals.length + lostDeals.length > 0 ? (wonDeals.length / (wonDeals.length + lostDeals.length)) * 100 : null;
 
-  const largestOpportunities = [...relevantDeals]
+  const largestActiveOpportunity = [...openDeals]
+    .filter((deal) => deal.dealValue !== null)
+    .sort((a, b) => (b.dealValue ?? 0) - (a.dealValue ?? 0))[0] ?? null;
+
+  const largestOpportunities = [...openDeals]
     .filter((deal) => deal.dealValue !== null)
     .sort((a, b) => (b.dealValue ?? 0) - (a.dealValue ?? 0))
     .slice(0, 5)
@@ -292,17 +330,20 @@ export function getPipelineSummary(
     }));
 
   const bySector: Record<string, number> = {};
-  const byStage: Record<string, number> = {};
+  const stageGroups = new Map<string, { opportunityCount: number; values: number[] }>();
   const byCustomer: Record<string, number> = {};
   const byClosePeriod: Record<string, number> = {};
 
-  for (const deal of relevantDeals) {
+  for (const deal of openDeals) {
     if (deal.sector) {
       bySector[deal.sector] = (bySector[deal.sector] ?? 0) + (deal.dealValue ?? 0);
     }
 
-    const stageKey = deal.dealStage ?? "Unknown";
-    byStage[stageKey] = (byStage[stageKey] ?? 0) + (deal.dealValue ?? 0);
+    const stageKey = deal.dealStage ?? "Unspecified";
+    const stage = stageGroups.get(stageKey) ?? { opportunityCount: 0, values: [] };
+    stage.opportunityCount += 1;
+    if (deal.dealValue !== null) stage.values.push(deal.dealValue);
+    stageGroups.set(stageKey, stage);
 
     const customerKey = deal.clientCode ?? deal.dealName ?? "Unknown";
     byCustomer[customerKey] = (byCustomer[customerKey] ?? 0) + (deal.dealValue ?? 0);
@@ -316,16 +357,27 @@ export function getPipelineSummary(
     recordsAnalyzed: totalDeals,
     recordsExcluded: Math.max(deals.length - totalDeals, 0),
     timeRange: { label: intent?.timePeriod?.label ?? "this_year", start: buildTimeRange(intent, "this_year").start?.toISOString() ?? null, end: buildTimeRange(intent, "this_year").end?.toISOString() ?? null },
-    totalPipelineValue: safeRound(totalPipelineValue),
+    totalPipelineValue: safeRound(activePipelineValue),
+    activePipelineValue: safeRound(activePipelineValue),
+    closedWonValue: safeRound(closedWonValue),
+    closedLostValue: safeRound(closedLostValue),
     weightedPipelineValue: safeRound(weightedPipelineValue),
     numberOfDeals: totalDeals,
-    activeOpenDeals: openDeals,
-    closedWonDeals: wonDeals,
-    closedLostDeals: lostDeals,
+    activeOpenDeals: openDeals.length,
+    closedWonDeals: wonDeals.length,
+    closedLostDeals: lostDeals.length,
     averageDealValue: safeRound(averageDealValue),
     winRate: safeRound(winRate),
+    largestActiveOpportunity: largestActiveOpportunity ? safeRound(largestActiveOpportunity.dealValue) : null,
     bySector,
-    byStage,
+    pipelineByStage: [...stageGroups.entries()]
+      .map(([stage, values]) => ({
+        stage,
+        opportunities: values.opportunityCount,
+        pipelineValue: values.values.length > 0 ? safeRound(sum(values.values)) : null,
+        valuedOpportunities: values.values.length,
+      }))
+      .sort((a, b) => (b.pipelineValue ?? -1) - (a.pipelineValue ?? -1) || b.opportunities - a.opportunities),
     byCustomer,
     byClosePeriod,
     largestOpportunities,
@@ -335,7 +387,7 @@ export function getPipelineSummary(
       missingCloseDate: relevantDeals.filter((deal) => deal.actualCloseDate === null && deal.tentativeCloseDate === null).length,
     },
     assumptions: [
-      "Open deals are those whose normalized status is not closed-won or closed-lost.",
+      "Active pipeline includes only open or active deals; closed-won and closed-lost deals are reported separately.",
       "Weighted pipeline value uses probability only when a valid numeric or categorical probability exists.",
     ],
     limitations: [
@@ -457,14 +509,10 @@ export function getOperationalSummary(
   const relevantOrders = filterOrdersByTimeRange(workOrders, intent);
   const totalWorkOrders = relevantOrders.length;
   const statusCounts: Record<string, number> = {};
-  const completed = relevantOrders.filter((order) => order.executionStatus?.toLowerCase() === "completed").length;
-  const active = relevantOrders.filter((order) => ["in progress", "scheduled", "pending", "review", "open"].includes((order.executionStatus ?? "").toLowerCase())).length;
-  const delayed = relevantOrders.filter((order) => {
-    if (order.executionStatus?.toLowerCase() === "delayed") return true;
-    if (order.executionStatus?.toLowerCase() === "blocked") return true;
-    if (order.probableEndDate && new Date(order.probableEndDate) < new Date() && order.executionStatus?.toLowerCase() !== "completed") return true;
-    return false;
-  }).length;
+  const completed = relevantOrders.filter((order) => isCompletedWorkOrder(order.executionStatus)).length;
+  const ongoing = relevantOrders.filter((order) => isOngoingWorkOrder(order.executionStatus)).length;
+  const notStarted = relevantOrders.filter((order) => isNotStartedWorkOrder(order.executionStatus)).length;
+  const delayed = relevantOrders.filter((order) => isDelayedWorkOrder(order.executionStatus, order.probableEndDate)).length;
 
   for (const order of relevantOrders) {
     const key = order.executionStatus ?? "Unknown";
@@ -515,8 +563,11 @@ export function getOperationalSummary(
     recordsExcluded: Math.max(workOrders.length - totalWorkOrders, 0),
     totalWorkOrders: totalWorkOrders,
     completedWorkOrders: completed,
-    activeWorkOrders: active,
+    ongoingWorkOrders: ongoing,
+    notStartedWorkOrders: notStarted,
+    activeWorkOrders: ongoing,
     delayedWorkOrders: delayed,
+    completionPercentage: safeRound(completionRate),
     completionRate: safeRound(completionRate),
     totalOperationalValue: safeRound(totalValue),
     workOrdersByStatus: statusCounts,
@@ -524,7 +575,8 @@ export function getOperationalSummary(
     byCustomer,
     byMonth: timeBuckets,
     assumptions: [
-      "Active work orders are those whose execution status is in progress, scheduled, pending, review, or open.",
+      "Completed work orders are those explicitly marked completed.",
+      "Ongoing work orders include in-progress and active statuses; not-started includes planned or queued statuses.",
       "Delayed work orders require either an explicit delayed/blocked status or a past probable end date before the current system date.",
     ],
     limitations: [
@@ -783,4 +835,24 @@ export function getWorkOrderSummary(
   intent: QueryIntent,
 ): AnalyticsResult {
   return getOperationalSummary(workOrders, intent);
+}
+
+export function getExecutiveKpis(
+  deals: NormalizedDeal[],
+  workOrders: NormalizedWorkOrder[],
+  intent: QueryIntent = { rawQuestion: "Executive KPI summary", type: "leadership_summary" },
+) {
+  const pipeline = getPipelineSummary(deals, { ...intent, type: "pipeline_analysis" });
+  const risk = getRiskSummary(deals, workOrders, { ...intent, type: "risk_identification" });
+  const operations = getOperationalSummary(workOrders, { ...intent, type: "work_order_analysis" });
+
+  return {
+    totalPipeline: pipeline.data.totalPipelineValue ?? null,
+    openDeals: pipeline.data.activeOpenDeals ?? null,
+    winRate: pipeline.data.winRate ?? null,
+    atRiskWorkOrders: risk.data.delayedWorkOrders ?? null,
+    closedWon: pipeline.data.closedWonDeals ?? null,
+    completionRate: operations.data.completionRate ?? null,
+    generatedAt: new Date().toISOString(),
+  };
 }

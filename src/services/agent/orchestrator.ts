@@ -17,7 +17,6 @@ import type {
   NormalizedDeal,
   NormalizedWorkOrder,
   QueryIntent,
-  QueryIntentType,
 } from "@/types/domain";
 
 import {
@@ -278,6 +277,51 @@ function formatPercent(value: number | null | undefined): string {
   return `${Number(value).toFixed(1)}%`;
 }
 
+function formatSourceValue(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "Not available";
+  return new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(value);
+}
+
+type PipelinePayload = {
+  totalPipelineValue: number | null;
+  activeOpenDeals: number;
+  closedWonDeals: number;
+  largestOpportunities: Array<{ dealName: string | null; value: number | null; stage: string | null }>;
+  pipelineByStage: Array<{ stage: string; opportunities: number; pipelineValue: number | null; valuedOpportunities: number }>;
+  missingInformation: { missingDealValue: number };
+};
+
+/** Fixed data-only response for the core pipeline question. */
+function buildPipelineExecutiveResponse(analyticsResult: AnalyticsResult, sourceDeals: NormalizedDeal[], intent: QueryIntent): AgentResponse {
+  if (sourceDeals.length === 0) return { answer: "The required Deals data could not be retrieved, so a pipeline summary is unavailable.", executive_headline: "Pipeline data unavailable", key_metrics: [], insights: [], data_quality: analyticsResult.dataQuality, sources_context: ["Deals"], analysis_details: buildAnalysisDetails(intent, analyticsResult, sourceDeals, []) };
+
+  const data = analyticsResult.data as unknown as PipelinePayload;
+  const largest = data.largestOpportunities[0];
+  const totalAvailable = data.totalPipelineValue !== null;
+  const headline = totalAvailable ? `Current pipeline is ${formatSourceValue(data.totalPipelineValue)} across ${data.activeOpenDeals} active opportunities.` : `${data.activeOpenDeals} active opportunities were retrieved, but their pipeline value could not be calculated from the available deal values.`;
+  const largestValue = largest?.value === null || !largest ? "Not available" : `${largest.dealName ?? "Name unavailable"} · ${formatSourceValue(largest.value)}`;
+  const stageRows = data.pipelineByStage.map((stage) => [stage.stage, String(stage.opportunities), stage.pipelineValue === null ? "Not available" : formatSourceValue(stage.pipelineValue)]);
+  const leadingStage = data.pipelineByStage[0];
+  const insights: string[] = [];
+  if (leadingStage) insights.push(`${leadingStage.stage} contains the largest current stage group, with ${leadingStage.opportunities} active opportunities.`);
+  if (data.missingInformation.missingDealValue > 0) insights.push(`${data.missingInformation.missingDealValue} active opportunities lack a valid deal value and are excluded from pipeline-value totals.`);
+  if (insights.length === 0) insights.push("Pipeline stage and value coverage are available from the retrieved Deals data.");
+  const recommendedAction = data.missingInformation.missingDealValue > 0 ? `Complete deal values for the ${data.missingInformation.missingDealValue} active opportunities currently excluded from the pipeline total.` : leadingStage ? `Review the ${leadingStage.opportunities} active opportunities in ${leadingStage.stage}, the largest current stage group.` : "Assign a stage to active opportunities so the pipeline can be prioritized reliably.";
+
+  return {
+    answer: headline, executive_headline: headline,
+    key_metrics: [
+      { label: "Total Pipeline", value: totalAvailable ? formatSourceValue(data.totalPipelineValue) : "Not available", detail: totalAvailable ? "Valid active deal values" : "No valid active deal values" },
+      { label: "Active Opportunities", value: String(data.activeOpenDeals) },
+      { label: "Closed Won", value: String(data.closedWonDeals), detail: "Opportunities" },
+      { label: "Largest Opportunity", value: largestValue, detail: largest?.stage ?? "No valid active opportunity value" },
+    ],
+    table: { columns: ["Pipeline stage", "Active opportunities", "Pipeline value"], rows: stageRows },
+    insights, recommended_action: recommendedAction,
+    analysis_details: buildAnalysisDetails(intent, analyticsResult, sourceDeals, []), data_quality: analyticsResult.dataQuality, sources_context: ["Deals"],
+  };
+}
+
 function buildAnalysisDetails(
   intent: QueryIntent,
   analyticsResult: AnalyticsResult | null,
@@ -329,7 +373,20 @@ function buildFallbackResponse(question: string, intent: QueryIntent, analyticsR
     return empty;
   }
 
-  const payload = analyticsResult.data as Record<string, any>;
+  const payload = analyticsResult.data as {
+    totalPipelineValue?: number | null;
+    weightedPipelineValue?: number | null;
+    completionRate?: number | null;
+    totalWorkOrders?: number | null;
+    delayedWorkOrders?: number | null;
+    totalOperationalValue?: number | null;
+    sectors?: Array<{ sector?: string }>;
+    missingInformation?: Record<string, number | null | undefined>;
+    revenueSummary?: { totalPipelineValue?: number | null };
+    atRiskDeals?: number | null;
+    pipelineSummary?: { totalPipelineValue?: number | null };
+    operationalSummary?: { completionRate?: number | null };
+  };
   const metrics: Array<{ label: string; value: string; detail?: string }> = [];
   const insights: string[] = [];
 
@@ -360,8 +417,8 @@ function buildFallbackResponse(question: string, intent: QueryIntent, analyticsR
   }
 
   if (payload.missingInformation) {
-    const missingFields = Object.entries(payload.missingInformation ?? {})
-      .filter(([, value]) => Number(value) > 0)
+    const missingFields = Object.entries(payload.missingInformation)
+      .filter(([, value]) => Number(value ?? 0) > 0)
       .map(([key, value]) => `${key}: ${value}`);
     if (missingFields.length > 0) {
       insights.push(`Key data gaps: ${missingFields.join(", ")}.`);
@@ -371,7 +428,7 @@ function buildFallbackResponse(question: string, intent: QueryIntent, analyticsR
   const answerBase = (() => {
     if (intent.type === "clarification_needed") return "I need a bit more clarity on whether you mean pipeline, revenue, operations, or risk.";
     if (intent.type === "revenue_analysis") {
-      const value = payload.revenueSummary?.totalPipelineValue ?? payload.totalPipelineValue;
+      const value = payload.revenueSummary?.totalPipelineValue ?? payload.totalPipelineValue ?? null;
       return value !== null && value !== undefined ? `Revenue coverage is currently ${formatMoney(value)} based on the available pipeline data.` : "Revenue is not available because the underlying numbers are missing or incomplete.";
     }
     if (intent.type === "work_order_analysis") {
@@ -386,8 +443,8 @@ function buildFallbackResponse(question: string, intent: QueryIntent, analyticsR
       return payload.sectors?.length ? `The strongest sector currently is ${payload.sectors[0].sector}.` : "There is not enough valid sector data to rank performance.";
     }
     if (intent.type === "leadership_summary") {
-      const pipeline = payload.pipelineSummary?.totalPipelineValue ?? payload.totalPipelineValue;
-      const op = payload.operationalSummary?.completionRate ?? payload.completionRate;
+      const pipeline = payload.pipelineSummary?.totalPipelineValue ?? payload.totalPipelineValue ?? null;
+      const op = payload.operationalSummary?.completionRate ?? payload.completionRate ?? null;
       return `Leadership summary: pipeline is ${pipeline !== null && pipeline !== undefined ? formatMoney(pipeline) : "not available"} and completion rate is ${op !== null && op !== undefined ? formatPercent(op) : "not available"}.`;
     }
     const pipeline = payload.totalPipelineValue ?? null;
@@ -542,6 +599,11 @@ export async function handleUserQuestion(
   }
 
   const fallback = buildFallbackResponse(question, intent, analyticsResult, sourceDeals, sourceWorkOrders);
+
+  // Pipeline answers are intentionally deterministic: no LLM may alter or invent them.
+  if (intent.type === "pipeline_analysis" && analyticsResult) {
+    return buildPipelineExecutiveResponse(analyticsResult, sourceDeals, intent);
+  }
 
   if (!analyticsResult || !(sourceDeals.length || sourceWorkOrders.length)) {
     return {

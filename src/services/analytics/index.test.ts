@@ -132,36 +132,39 @@ const fullDateRange = {
   end: "2028-12-31",
 };
 
-test("pipeline summary uses deterministic deal arithmetic", () => {
+test("pipeline summary uses deterministic deal arithmetic and active-only pipeline reporting", () => {
   const result = getPipelineSummary(deals, { rawQuestion: "What is the pipeline?", type: "pipeline_analysis", timePeriod: fullDateRange });
 
-  assert.equal(result.data.totalPipelineValue, 350000);
-  assert.equal(result.data.weightedPipelineValue, 150000 * 0.9 + 120000 * 0.6);
+  assert.equal(result.data.totalPipelineValue, 120000);
+  assert.equal(result.data.activePipelineValue, 120000);
+  assert.equal(result.data.closedWonValue, 150000);
+  assert.equal(result.data.closedLostValue, 80000);
+  assert.equal(result.data.weightedPipelineValue, 120000 * 0.6);
   assert.equal(result.data.numberOfDeals, 3);
   assert.equal(result.data.closedWonDeals, 1);
   assert.equal(result.data.closedLostDeals, 1);
   assert.equal(result.data.activeOpenDeals, 1);
-  assert.equal(result.data.averageDealValue, 116666.67);
+  assert.equal(result.data.averageDealValue, 120000);
   assert.equal(result.data.winRate, 50);
 });
 
 test("revenue summary respects missing probability data", () => {
   const result = getRevenueSummary(deals, { rawQuestion: "What is revenue?", type: "revenue_analysis", timePeriod: fullDateRange });
-  const data = result.data as Record<string, any>;
-  assert.equal(data.revenueSummary.totalPipelineValue, 350000);
+  const data = result.data as Record<string, unknown> & { revenueSummary?: { totalPipelineValue?: number | null }; notAvailable?: string | null };
+  assert.equal(data.revenueSummary?.totalPipelineValue, 120000);
   assert.equal(data.notAvailable, null);
 });
 
 test("sector performance groups value by normalized sector", () => {
   const result = getSectorPerformance(deals, workOrders, { rawQuestion: "Sector performance?", type: "sector_analysis", timePeriod: fullDateRange });
-  const data = result.data as Record<string, any>;
-  assert.ok(data.sectors.some((sector: any) => sector.sector === "Mining"));
-  assert.ok(data.sectors.some((sector: any) => sector.sector === "Construction"));
+  const data = result.data as { sectors: Array<{ sector: string }> };
+  assert.ok(data.sectors.some((sector) => sector.sector === "Mining"));
+  assert.ok(data.sectors.some((sector) => sector.sector === "Construction"));
 });
 
 test("operational summary counts status and at-risk work orders", () => {
   const result = getOperationalSummary(workOrders, { rawQuestion: "Work order status?", type: "work_order_analysis", timePeriod: fullDateRange });
-  const data = result.data as Record<string, any>;
+  const data = result.data as { totalWorkOrders: number; completedWorkOrders: number; delayedWorkOrders: number; workOrdersByStatus: Record<string, number> };
   assert.equal(data.totalWorkOrders, 2);
   assert.equal(data.completedWorkOrders, 1);
   assert.equal(data.delayedWorkOrders, 1);
@@ -172,4 +175,57 @@ test("risk summary flags delayed exposure without guessing", () => {
   const result = getRiskSummary(deals, workOrders, { rawQuestion: "Risk summary", type: "risk_identification", timePeriod: fullDateRange });
   assert.equal(result.data.atRiskDeals, 0);
   assert.equal(result.data.delayedWorkOrders, 1);
+});
+
+test("active pipeline excludes closed won and lost deals and measures work-order completion deterministically", () => {
+  const pipeline = getPipelineSummary(deals, { rawQuestion: "What is the active pipeline?", type: "pipeline_analysis", timePeriod: fullDateRange });
+  const operational = getOperationalSummary(workOrders, { rawQuestion: "Work order status?", type: "work_order_analysis", timePeriod: fullDateRange });
+
+  const pipelineData = pipeline.data as { totalPipelineValue: number; activePipelineValue: number; closedWonValue: number; closedLostValue: number; largestActiveOpportunity: number | null };
+  const operationalData = operational.data as { totalWorkOrders: number; completedWorkOrders: number; ongoingWorkOrders: number; notStartedWorkOrders: number; completionPercentage: number | null };
+
+  assert.equal(pipelineData.totalPipelineValue, 120000);
+  assert.equal(pipelineData.activePipelineValue, 120000);
+  assert.equal(pipelineData.closedWonValue, 150000);
+  assert.equal(pipelineData.closedLostValue, 80000);
+  assert.equal(pipelineData.largestActiveOpportunity, 120000);
+  assert.equal(operationalData.totalWorkOrders, 2);
+  assert.equal(operationalData.completedWorkOrders, 1);
+  assert.equal(operationalData.ongoingWorkOrders, 1);
+  assert.equal(operationalData.notStartedWorkOrders, 0);
+  assert.equal(operationalData.completionPercentage, 50);
+});
+
+test("executive KPI snapshot updates when source data changes", () => {
+  const baseKpis = getExecutiveKpis(deals, workOrders, { rawQuestion: "Executive KPI summary", type: "leadership_summary", timePeriod: fullDateRange });
+
+  assert.equal(baseKpis.totalPipeline, 120000);
+  assert.equal(baseKpis.openDeals, 1);
+  assert.equal(baseKpis.winRate, 50);
+  assert.equal(baseKpis.atRiskWorkOrders, 1);
+  assert.equal(baseKpis.closedWon, 1);
+  assert.equal(baseKpis.completionRate, 50);
+
+  const expandedDeals = [
+    ...deals,
+    {
+      ...deals[1],
+      itemId: "d4",
+      dealName: "Delta",
+      dealStatus: "Open",
+      dealValue: 200000,
+      closureProbability: "80%",
+      sector: "Energy",
+      clientCode: "CUST_4",
+    },
+  ];
+
+  const updatedKpis = getExecutiveKpis(expandedDeals, workOrders, { rawQuestion: "Executive KPI summary", type: "leadership_summary", timePeriod: fullDateRange });
+
+  assert.equal(updatedKpis.totalPipeline, 320000);
+  assert.equal(updatedKpis.openDeals, 2);
+  assert.equal(updatedKpis.winRate, 50);
+  assert.equal(updatedKpis.atRiskWorkOrders, 1);
+  assert.equal(updatedKpis.closedWon, 1);
+  assert.equal(updatedKpis.completionRate, 50);
 });

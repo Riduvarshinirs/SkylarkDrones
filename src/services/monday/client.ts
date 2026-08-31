@@ -83,6 +83,7 @@ function mapColumnValue(raw: Record<string, unknown>): MondayColumnValue {
   const value = typeof raw.value === "string" ? raw.value : null;
   return {
     id: typeof raw.id === "string" ? raw.id : "unknown",
+    title: typeof raw.title === "string" ? raw.title : undefined,
     text: typeof raw.text === "string" ? raw.text : null,
     value,
     type: typeof raw.type === "string" ? raw.type : undefined,
@@ -121,6 +122,7 @@ async function fetchBoardPage(
             name
             column_values {
               id
+              title
               text
               value
               type

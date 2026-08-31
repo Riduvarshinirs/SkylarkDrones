@@ -1,18 +1,13 @@
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
-import { handleUserQuestion } from "@/services/agent/orchestrator";
-import { fetchDealsBoard, fetchWorkOrdersBoard, getMondayConfig, MondayApiError, MondayConfigError } from "@/services/monday/client";
+import { NextResponse } from "next/server";
+import { getMondayConfig, fetchDealsBoard, fetchWorkOrdersBoard, MondayApiError, MondayConfigError } from "@/services/monday/client";
 import { normalizeDeals, normalizeWorkOrders } from "@/services/data/normalize";
-
-const requestSchema = z.object({
-  question: z.string().min(1, "question is required").max(2000),
-});
+import { getExecutiveKpis } from "@/services/analytics";
 
 function normalizeBoardColumnKey(value: string | null | undefined): string {
   return (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "").trim();
 }
 
-function findColumnValue(item: { column_values?: Array<{ id?: string; title?: string; text?: string | null; value?: string | null; type?: string }> }, aliases: string[]): { id?: string; title?: string; text?: string | null; value?: string | null; type?: string } | null {
+function findColumnValue(item: { column_values?: Array<{ id?: string; text?: string | null; value?: string | null; type?: string }> }, aliases: string[]): { id?: string; text?: string | null; value?: string | null; type?: string } | null {
   if (!item.column_values) {
     return null;
   }
@@ -20,11 +15,10 @@ function findColumnValue(item: { column_values?: Array<{ id?: string; title?: st
   const aliasKeys = aliases.map(normalizeBoardColumnKey);
   for (const column of item.column_values) {
     const idKey = normalizeBoardColumnKey(column.id);
-    const titleKey = normalizeBoardColumnKey(column.title);
     const textKey = normalizeBoardColumnKey(column.text ?? "");
     const valueKey = normalizeBoardColumnKey(column.value ?? "");
 
-    const matches = aliasKeys.some((alias) => idKey === alias || titleKey === alias || titleKey.includes(alias) || idKey.includes(alias));
+    const matches = aliasKeys.some((alias) => idKey === alias || textKey.includes(alias) || valueKey.includes(alias) || idKey.includes(alias));
     if (matches) {
       return column;
     }
@@ -33,42 +27,9 @@ function findColumnValue(item: { column_values?: Array<{ id?: string; title?: st
   return null;
 }
 
-export async function POST(req: NextRequest) {
-  let body: unknown;
+export async function GET() {
   try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json(
-      { error: "Request body must be valid JSON." },
-      { status: 400 },
-    );
-  }
-
-  const parsed = requestSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: parsed.error.issues[0]?.message ?? "Invalid request." },
-      { status: 400 },
-    );
-  }
-
-  try {
-    let config;
-    try {
-      config = getMondayConfig();
-    } catch (error) {
-      if (error instanceof MondayConfigError) {
-        return NextResponse.json(
-          {
-            error: error.message,
-            code: "MONDAY_NOT_CONFIGURED",
-          },
-          { status: 503 },
-        );
-      }
-      throw error;
-    }
-
+    const config = getMondayConfig();
     const [dealsBoard, workOrdersBoard] = await Promise.all([
       fetchDealsBoard(config),
       fetchWorkOrdersBoard(config),
@@ -87,13 +48,6 @@ export async function POST(req: NextRequest) {
         const productValue = findColumnValue(item, ["product", "product_deal", "productdeal", "service"]);
         const sectorValue = findColumnValue(item, ["sector", "sectorservice", "sector_service", "industry"]);
         const createdDateValue = findColumnValue(item, ["created_date", "createddate", "datecreated"]);
-
-        if (process.env.NODE_ENV !== "production") {
-          const missingColumns = [ownerValue, clientValue, statusValue, actualCloseDateValue, probabilityValue, dealValueColumn, tentativeCloseDateValue, dealStageValue, productValue, sectorValue, createdDateValue].filter((value) => value === null);
-          if (missingColumns.length > 0) {
-            console.debug("[monday:deals] item columns missing expected mappings", { itemId: item.id, itemName: item.name, missingCount: missingColumns.length });
-          }
-        }
 
         return {
           itemId: item.id,
@@ -137,13 +91,6 @@ export async function POST(req: NextRequest) {
         const woStatusBilledValue = findColumnValue(item, ["wo_status_billed", "wostatusbilled", "billing_status"]);
         const billingStatusValue = findColumnValue(item, ["billing_status", "billingstatus", "payment_status"]);
 
-        if (process.env.NODE_ENV !== "production") {
-          const missingColumns = [customerValue, serialValue, natureOfWorkValue, executionStatusValue, dataDeliveryDateValue, poDateValue, documentTypeValue, probableStartDateValue, probableEndDateValue, workOrderOwnerValue, sectorValue, typeOfWorkValue, amountExclGstValue, amountInclGstValue, billedExclGstValue, billedInclGstValue, collectedInclGstValue, amountReceivableValue, invoiceStatusValue, woStatusBilledValue, billingStatusValue].filter((value) => value === null);
-          if (missingColumns.length > 0) {
-            console.debug("[monday:work_orders] item columns missing expected mappings", { itemId: item.id, itemName: item.name, missingCount: missingColumns.length });
-          }
-        }
-
         return {
           itemId: item.id,
           dealNameMasked: item.name,
@@ -172,21 +119,18 @@ export async function POST(req: NextRequest) {
       }),
     );
 
-    const result = await handleUserQuestion(parsed.data.question, [], {
-      deals: normalizedDeals.records,
-      workOrders: normalizedWorkOrders.records,
-    });
+    const kpis = getExecutiveKpis(normalizedDeals.records, normalizedWorkOrders.records);
 
-    return NextResponse.json(result);
+    return NextResponse.json({ kpis });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    const code = error instanceof MondayApiError ? "MONDAY_API_ERROR" : "AGENT_ERROR";
-    return NextResponse.json(
-      {
-        error: message,
-        code,
-      },
-      { status: error instanceof MondayApiError ? 502 : 500 },
-    );
+    if (error instanceof MondayConfigError) {
+      return NextResponse.json({ error: error.message }, { status: 503 });
+    }
+
+    if (error instanceof MondayApiError) {
+      return NextResponse.json({ error: error.message }, { status: 502 });
+    }
+
+    return NextResponse.json({ error: "Unable to load KPI data." }, { status: 500 });
   }
 }

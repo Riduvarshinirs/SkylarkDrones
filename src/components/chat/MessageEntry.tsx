@@ -10,6 +10,8 @@ export interface EntryData {
   answer?: string;
   response?: {
     answer?: string;
+    executive_headline?: string;
+    recommended_action?: string;
     key_metrics?: Array<{ label: string; value: string; detail?: string }>;
     insights?: string[];
     leadership_update?: {
@@ -156,7 +158,7 @@ export function MessageEntry({ entry }: { entry: EntryData }) {
           <div className="space-y-5">
             <section className="rounded-xl border border-line bg-panel-raised p-4 sm:p-5">
               <div className="mb-2 font-mono text-[0.68rem] uppercase tracking-[0.12em] text-graphite-soft">
-                Executive answer
+                Executive headline
               </div>
               <p className="whitespace-pre-line text-[0.95rem] leading-7 text-ink">
                 {response?.answer ?? entry.answer ?? "No answer available."}
@@ -199,6 +201,15 @@ export function MessageEntry({ entry }: { entry: EntryData }) {
                     </li>
                   ))}
                 </ul>
+              </section>
+            )}
+
+            {response?.recommended_action && (
+              <section className="rounded-xl border border-signal/30 bg-signal-tint p-4">
+                <div className="mb-2 font-mono text-[0.68rem] uppercase tracking-[0.12em] text-signal">
+                  Recommended action
+                </div>
+                <p className="text-[0.92rem] leading-6 text-ink">{response.recommended_action}</p>
               </section>
             )}
 

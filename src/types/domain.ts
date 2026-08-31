@@ -17,6 +17,7 @@
 /** A single column value as returned by the monday.com API for one item. */
 export interface MondayColumnValue {
   id: string;
+  title?: string;
   text: string | null;
   value: string | null;
   type?: string;
@@ -264,7 +265,9 @@ export interface AnalysisDetails {
 
 export interface AgentResponse {
   answer: string;
+  executive_headline?: string;
   insight?: string;
+  recommended_action?: string;
   key_metrics?: AgentMetric[];
   insights?: string[];
   kpis?: KpiCardData[];
