@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { formatTime } from "@/lib/utils";
 import { StatusDot } from "@/components/ui/StatusDot";
 
@@ -14,6 +15,27 @@ export interface EntryData {
     recommended_action?: string;
     key_metrics?: Array<{ label: string; value: string; detail?: string }>;
     insights?: string[];
+    executiveBrief?: {
+      title: string;
+      summary: string[];
+      sales: {
+        pipelineValue: string;
+        activeOpportunities: number | null;
+        closedWon: number | null;
+        closedLost: number | null;
+        largestOpportunity: string;
+        strongestSector: string;
+      };
+      operations: {
+        totalWorkOrders: number | null;
+        completionRate: string;
+        ongoingWorkOrders: number | null;
+        atRiskWorkOrders: number | null;
+      };
+      risks: string[];
+      recommendedActions: string[];
+      caveats: string[];
+    };
     leadership_update?: {
       business_snapshot: string;
       commercial_pipeline: string;
@@ -33,8 +55,34 @@ export interface EntryData {
     };
     data_quality?: Record<string, unknown>;
     sources_context?: string[];
+    follow_up_suggestions?: string[];
     kpis?: Array<{ label: string; value: string; sublabel?: string }>;
     table?: { columns: string[]; rows: Array<Array<string | number>> };
+    operations_intelligence?: {
+      statusOverview?: {
+        completed?: number;
+        ongoing?: number;
+        notStarted?: number;
+        otherStatuses?: Array<{ status: string; count: number }>;
+      };
+      completionRate?: number | null;
+      atRiskWorkOrders?: {
+        high?: number;
+        medium?: number;
+        low?: number;
+        items?: Array<{
+          workOrderName?: string | null;
+          status?: string | null;
+          priority?: string | null;
+          relevantDate?: string | null;
+          reason?: string;
+          reasons?: string[];
+          riskScore?: number;
+          riskLevel?: string;
+        }>;
+      };
+      executiveInsight?: string;
+    };
     insight?: string;
   };
   errorMessage?: string;
@@ -79,6 +127,7 @@ function renderTable(table?: { columns: string[]; rows: Array<Array<string | num
 }
 
 export function MessageEntry({ entry }: { entry: EntryData }) {
+  const [copied, setCopied] = useState(false);
   const response = entry.response;
   const quality = (response?.data_quality ?? {}) as Record<string, unknown>;
   const coverage = toNumber(quality.coveragePercent) ?? toNumber(quality.coverage) ?? 0;
@@ -87,7 +136,53 @@ export function MessageEntry({ entry }: { entry: EntryData }) {
   const caveats = Array.isArray(quality.caveats) ? (quality.caveats as string[]) : [];
   const analysisDetails = response?.analysis_details ?? undefined;
   const insights = response?.insights ?? [];
+  const executiveBrief = response?.executiveBrief;
   const leadershipUpdate = response?.leadership_update;
+  const operationsIntelligence = response?.operations_intelligence;
+  const followUpSuggestions = response?.follow_up_suggestions ?? [];
+
+  const copyReport = async () => {
+    if (!executiveBrief) return;
+
+    const text = [
+      executiveBrief.title,
+      "",
+      "1. Executive Summary",
+      ...executiveBrief.summary.map((item) => `- ${item}`),
+      "",
+      "2. Sales",
+      `- Pipeline value: ${executiveBrief.sales.pipelineValue}`,
+      `- Active opportunities: ${executiveBrief.sales.activeOpportunities ?? "Unavailable"}`,
+      `- Closed won: ${executiveBrief.sales.closedWon ?? "Unavailable"}`,
+      `- Closed lost: ${executiveBrief.sales.closedLost ?? "Unavailable"}`,
+      `- Largest opportunity: ${executiveBrief.sales.largestOpportunity}`,
+      `- Strongest sector: ${executiveBrief.sales.strongestSector}`,
+      "",
+      "3. Operations",
+      `- Total work orders: ${executiveBrief.operations.totalWorkOrders ?? "Unavailable"}`,
+      `- Completion rate: ${executiveBrief.operations.completionRate}`,
+      `- Ongoing work: ${executiveBrief.operations.ongoingWorkOrders ?? "Unavailable"}`,
+      `- At-risk work orders: ${executiveBrief.operations.atRiskWorkOrders ?? "Unavailable"}`,
+      "",
+      "4. Risks",
+      ...executiveBrief.risks.map((item) => `- ${item}`),
+      "",
+      "5. Recommended Actions",
+      ...executiveBrief.recommendedActions.map((item) => `- ${item}`),
+      "",
+      "Caveats",
+      ...executiveBrief.caveats.map((item) => `- ${item}`),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch {
+      setCopied(false);
+    }
+  };
+
   const metrics = (response?.key_metrics ?? response?.kpis ?? []).map((metric) => {
     const detail =
       "detail" in metric && typeof metric.detail === "string"
@@ -170,7 +265,7 @@ export function MessageEntry({ entry }: { entry: EntryData }) {
                 <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-graphite-soft">
                   Key metrics
                 </div>
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   {metrics.map((metric) => (
                     <div key={`${metric.label}-${metric.value}`} className="rounded-xl border border-line bg-panel-raised p-3.5">
                       <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-graphite-soft">
@@ -213,7 +308,90 @@ export function MessageEntry({ entry }: { entry: EntryData }) {
               </section>
             )}
 
-            {leadershipUpdate && (
+            {executiveBrief && (
+              <section className="rounded-2xl border border-signal/40 bg-[radial-gradient(circle_at_top,_rgba(59,130,246,0.08),_transparent_48%)] p-4 shadow-[0_12px_32px_rgba(14,30,56,0.06)] sm:p-5">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <div className="font-mono text-[0.68rem] uppercase tracking-[0.14em] text-graphite-soft">
+                      {executiveBrief.title}
+                    </div>
+                    <div className="mt-1 text-[1.4rem] font-semibold tracking-tight text-ink">Executive briefing</div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={copyReport}
+                    className="rounded-full border border-line bg-panel px-3 py-1.5 font-mono text-[0.62rem] uppercase tracking-[0.12em] text-ink transition-colors hover:border-signal hover:text-signal"
+                  >
+                    {copied ? "Copied" : "Copy report"}
+                  </button>
+                </div>
+
+                <div className="space-y-5 text-[0.92rem] leading-6 text-ink">
+                  <div className="rounded-xl border border-line bg-panel-raised p-4">
+                    <div className="mb-2 font-mono text-[0.66rem] uppercase tracking-[0.12em] text-graphite-soft">1. Executive Summary</div>
+                    <div className="space-y-2">
+                      {executiveBrief.summary.map((paragraph) => (
+                        <p key={paragraph}>{paragraph}</p>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <div className="rounded-xl border border-line bg-panel-raised p-4">
+                      <div className="mb-3 font-mono text-[0.66rem] uppercase tracking-[0.12em] text-graphite-soft">2. Sales</div>
+                      <ul className="space-y-2">
+                        <li><span className="font-medium">Pipeline value:</span> {executiveBrief.sales.pipelineValue}</li>
+                        <li><span className="font-medium">Active opportunities:</span> {executiveBrief.sales.activeOpportunities ?? "Unavailable"}</li>
+                        <li><span className="font-medium">Closed won / lost:</span> {executiveBrief.sales.closedWon ?? "Unavailable"} / {executiveBrief.sales.closedLost ?? "Unavailable"}</li>
+                        <li><span className="font-medium">Largest opportunity:</span> {executiveBrief.sales.largestOpportunity}</li>
+                        <li><span className="font-medium">Strongest sector:</span> {executiveBrief.sales.strongestSector}</li>
+                      </ul>
+                    </div>
+
+                    <div className="rounded-xl border border-line bg-panel-raised p-4">
+                      <div className="mb-3 font-mono text-[0.66rem] uppercase tracking-[0.12em] text-graphite-soft">3. Operations</div>
+                      <ul className="space-y-2">
+                        <li><span className="font-medium">Total work orders:</span> {executiveBrief.operations.totalWorkOrders ?? "Unavailable"}</li>
+                        <li><span className="font-medium">Completion rate:</span> {executiveBrief.operations.completionRate}</li>
+                        <li><span className="font-medium">Ongoing work:</span> {executiveBrief.operations.ongoingWorkOrders ?? "Unavailable"}</li>
+                        <li><span className="font-medium">At-risk work orders:</span> {executiveBrief.operations.atRiskWorkOrders ?? "Unavailable"}</li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="rounded-xl border border-line bg-panel-raised p-4">
+                    <div className="mb-3 font-mono text-[0.66rem] uppercase tracking-[0.12em] text-graphite-soft">4. Risks</div>
+                    <ul className="list-disc space-y-2 pl-5">
+                      {executiveBrief.risks.map((risk) => (
+                        <li key={risk}>{risk}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  <div className="rounded-xl border border-line bg-panel-raised p-4">
+                    <div className="mb-3 font-mono text-[0.66rem] uppercase tracking-[0.12em] text-graphite-soft">5. Recommended Actions</div>
+                    <ul className="list-disc space-y-2 pl-5">
+                      {executiveBrief.recommendedActions.map((action) => (
+                        <li key={action}>{action}</li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {executiveBrief.caveats.length > 0 && (
+                    <div className="rounded-xl border border-warning/40 bg-warning/5 p-4 text-[0.85rem]">
+                      <div className="mb-2 font-mono text-[0.66rem] uppercase tracking-[0.12em] text-graphite-soft">Data caveats</div>
+                      <ul className="list-disc space-y-1 pl-5">
+                        {executiveBrief.caveats.map((caveat) => (
+                          <li key={caveat}>{caveat}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </section>
+            )}
+
+            {leadershipUpdate && !executiveBrief && (
               <section className="rounded-xl border border-line bg-panel-raised p-4">
                 <div className="mb-4 font-mono text-[0.68rem] uppercase tracking-[0.12em] text-graphite-soft">
                   Leadership update
@@ -279,7 +457,104 @@ export function MessageEntry({ entry }: { entry: EntryData }) {
               </section>
             )}
 
-            {response?.table && renderTable(response.table)}
+            {operationsIntelligence && (
+              <section className="rounded-xl border border-line bg-panel-raised p-4">
+                <div className="mb-4 font-mono text-[0.68rem] uppercase tracking-[0.12em] text-graphite-soft">
+                  Operations intelligence
+                </div>
+
+                <div className="mb-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-xl border border-line bg-panel p-3">
+                    <div className="font-mono text-[0.62rem] uppercase tracking-[0.08em] text-graphite-soft">Completed</div>
+                    <div className="mt-1 text-lg font-semibold text-ink">{operationsIntelligence.statusOverview?.completed ?? 0}</div>
+                  </div>
+                  <div className="rounded-xl border border-line bg-panel p-3">
+                    <div className="font-mono text-[0.62rem] uppercase tracking-[0.08em] text-graphite-soft">Ongoing</div>
+                    <div className="mt-1 text-lg font-semibold text-ink">{operationsIntelligence.statusOverview?.ongoing ?? 0}</div>
+                  </div>
+                  <div className="rounded-xl border border-line bg-panel p-3">
+                    <div className="font-mono text-[0.62rem] uppercase tracking-[0.08em] text-graphite-soft">Not started</div>
+                    <div className="mt-1 text-lg font-semibold text-ink">{operationsIntelligence.statusOverview?.notStarted ?? 0}</div>
+                  </div>
+                  <div className="rounded-xl border border-line bg-panel p-3">
+                    <div className="font-mono text-[0.62rem] uppercase tracking-[0.08em] text-graphite-soft">Completion rate</div>
+                    <div className="mt-1 text-lg font-semibold text-ink">{operationsIntelligence.completionRate !== null && operationsIntelligence.completionRate !== undefined ? `${operationsIntelligence.completionRate.toFixed(1)}%` : "N/A"}</div>
+                  </div>
+                </div>
+
+                {operationsIntelligence.statusOverview?.otherStatuses && operationsIntelligence.statusOverview.otherStatuses.length > 0 && (
+                  <div className="mb-4">
+                    <div className="mb-2 font-medium text-ink">Other actual statuses</div>
+                    <div className="flex flex-wrap gap-2">
+                      {operationsIntelligence.statusOverview.otherStatuses.map((status) => (
+                        <span key={status.status} className="rounded-full border border-line bg-panel px-2.5 py-1 font-mono text-[0.62rem] uppercase tracking-[0.08em] text-graphite">
+                          {status.status}: {status.count}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {operationsIntelligence.executiveInsight && (
+                  <div className="mb-4 rounded-lg border border-line bg-panel p-3 text-[0.83rem] text-ink">
+                    {operationsIntelligence.executiveInsight}
+                  </div>
+                )}
+
+                {operationsIntelligence.atRiskWorkOrders && operationsIntelligence.atRiskWorkOrders.items && operationsIntelligence.atRiskWorkOrders.items.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="font-medium text-ink">At-risk work orders</div>
+                      <div className="flex flex-wrap gap-2 text-[0.62rem] font-mono uppercase tracking-[0.08em] text-graphite-soft">
+                        <span className="rounded-full border border-line bg-panel px-2 py-1">High: {operationsIntelligence.atRiskWorkOrders.high ?? 0}</span>
+                        <span className="rounded-full border border-line bg-panel px-2 py-1">Medium: {operationsIntelligence.atRiskWorkOrders.medium ?? 0}</span>
+                        <span className="rounded-full border border-line bg-panel px-2 py-1">Low: {operationsIntelligence.atRiskWorkOrders.low ?? 0}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      {operationsIntelligence.atRiskWorkOrders.items.map((item) => (
+                        <div key={`${item.workOrderName ?? "work-order"}-${item.relevantDate ?? item.status ?? "risk"}`} className="rounded-lg border border-line bg-panel p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="font-medium text-ink">{item.workOrderName ?? "Unnamed work order"}</div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-[0.6rem] uppercase tracking-[0.08em] text-graphite-soft">Score {item.riskScore ?? 0}</span>
+                              <span className={`rounded-full border px-2 py-0.5 font-mono text-[0.6rem] uppercase tracking-[0.08em] ${item.riskLevel === "High" ? "border-risk/40 bg-risk-tint text-risk" : item.riskLevel === "Medium" ? "border-signal/40 bg-signal/10 text-signal" : "border-graphite/30 bg-panel text-graphite"}`}>
+                                {item.riskLevel}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="mt-2 grid gap-2 text-[0.75rem] text-graphite sm:grid-cols-2">
+                            <div><span className="font-medium text-ink">Status:</span> {item.status ?? "Unknown"}</div>
+                            <div><span className="font-medium text-ink">Priority:</span> {item.priority ?? "Not specified"}</div>
+                            <div><span className="font-medium text-ink">Relevant date:</span> {item.relevantDate ?? "Not available"}</div>
+                            <div><span className="font-medium text-ink">Primary reason:</span> {item.reason}</div>
+                          </div>
+                          {(item.reasons?.length ?? 0) > 0 && (
+                            <div className="mt-2 rounded-md border border-line bg-panel-raised p-2 text-[0.72rem] text-graphite">
+                              <div className="mb-1 font-medium text-ink">Why this matters</div>
+                              <ul className="list-disc space-y-1 pl-4">
+                                {item.reasons?.map((reason) => (
+                                  <li key={reason}>{reason}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+            )}
+
+            {response?.table && (
+              <section className="space-y-3">
+                <div className="font-mono text-[0.68rem] uppercase tracking-[0.12em] text-graphite-soft">
+                  Pipeline breakdown
+                </div>
+                {renderTable(response.table)}
+              </section>
+            )}
 
             {(coverage > 0 || recordsConsidered > 0 || recordsExcluded > 0 || caveats.length > 0) && (
               <section className="rounded-xl border border-line bg-panel-raised p-4">

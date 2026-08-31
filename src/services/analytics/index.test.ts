@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import type { NormalizedDeal, NormalizedWorkOrder } from "@/types/domain";
 import {
+  generateLeadershipUpdateData,
   getOperationalSummary,
   getExecutiveKpis,
   getOperationsIntelligenceSummary,
@@ -10,6 +11,7 @@ import {
   getRevenueSummary,
   getRiskSummary,
   getSectorPerformance,
+  getWorkOrderRiskAssessment,
 } from "./index";
 
 const deals: NormalizedDeal[] = [
@@ -94,6 +96,7 @@ const workOrders: NormalizedWorkOrder[] = [
     invoiceStatus: "Paid",
     woStatusBilled: "Completed",
     billingStatus: "Paid",
+    priority: "High",
     qualityFlags: [],
     isUsableForValueCalc: true,
     isUsableForDateCalc: true,
@@ -122,6 +125,7 @@ const workOrders: NormalizedWorkOrder[] = [
     invoiceStatus: "Pending",
     woStatusBilled: "Delayed",
     billingStatus: "Open",
+    priority: "High",
     qualityFlags: [],
     isUsableForValueCalc: true,
     isUsableForDateCalc: true,
@@ -179,6 +183,18 @@ test("risk summary flags delayed exposure without guessing", () => {
   assert.equal(result.data.delayedWorkOrders, 1);
 });
 
+test("work order risk assessment uses deterministic signals and transparent scoring", () => {
+  const delayed = getWorkOrderRiskAssessment(workOrders[1]);
+  assert.equal(delayed.riskLevel, "High");
+  assert.equal(delayed.riskScore, 80);
+  assert.ok(delayed.reasons.some((reason) => reason.toLowerCase().includes("overdue") || reason.toLowerCase().includes("date has passed")));
+
+  const lowRisk = getWorkOrderRiskAssessment(workOrders[0]);
+  assert.equal(lowRisk.riskLevel, "Low");
+  assert.equal(lowRisk.riskScore, 0);
+  assert.deepEqual(lowRisk.reasons, ["No material risk signals were identified from the available status and date fields."]);
+});
+
 test("operations intelligence summarizes status, completion rate, and at-risk work orders deterministically", () => {
   const result = getOperationsIntelligenceSummary(workOrders, { rawQuestion: "What is the operational status?", type: "work_order_analysis", timePeriod: fullDateRange });
   const data = result.data as {
@@ -215,6 +231,29 @@ test("active pipeline excludes closed won and lost deals and measures work-order
   assert.equal(operationalData.ongoingWorkOrders, 1);
   assert.equal(operationalData.notStartedWorkOrders, 0);
   assert.equal(operationalData.completionPercentage, 50);
+});
+
+test("leadership brief uses deterministic metrics and clearly marks unavailable signals", () => {
+  const brief = generateLeadershipUpdateData(deals, workOrders).data as {
+    executiveBrief?: {
+      title: string;
+      summary: string[];
+      sales: Record<string, unknown>;
+      operations: Record<string, unknown>;
+      risks: string[];
+      recommendedActions: string[];
+    };
+  };
+
+  assert.ok(brief.executiveBrief);
+  assert.equal(brief.executiveBrief?.title, "WEEKLY LEADERSHIP BRIEF");
+  assert.equal(brief.executiveBrief?.summary.length >= 2, true);
+  assert.equal(brief.executiveBrief?.sales.pipelineValue, "$120,000");
+  assert.equal(brief.executiveBrief?.sales.activeOpportunities, 1);
+  assert.equal(brief.executiveBrief?.operations.totalWorkOrders, 2);
+  assert.equal(brief.executiveBrief?.operations.completionRate, "50.0%");
+  assert.ok(!brief.executiveBrief?.summary.some((sentence) => /week-over-week|w\/w|trend/i.test(sentence)));
+  assert.ok(Array.isArray(brief.executiveBrief?.recommendedActions));
 });
 
 test("executive KPI snapshot updates when source data changes", () => {

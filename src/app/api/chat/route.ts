@@ -20,11 +20,11 @@ function findColumnValue(item: { column_values?: Array<{ id?: string; title?: st
   const aliasKeys = aliases.map(normalizeBoardColumnKey);
   for (const column of item.column_values) {
     const idKey = normalizeBoardColumnKey(column.id);
-    const titleKey = normalizeBoardColumnKey(column.title);
+    const titleKey = normalizeBoardColumnKey(column.title ?? "");
     const textKey = normalizeBoardColumnKey(column.text ?? "");
     const valueKey = normalizeBoardColumnKey(column.value ?? "");
 
-    const matches = aliasKeys.some((alias) => idKey === alias || titleKey === alias || titleKey.includes(alias) || idKey.includes(alias));
+    const matches = aliasKeys.some((alias) => idKey === alias || titleKey === alias || titleKey.includes(alias) || textKey.includes(alias) || valueKey.includes(alias) || idKey.includes(alias));
     if (matches) {
       return column;
     }
@@ -119,6 +119,7 @@ export async function POST(req: NextRequest) {
         const serialValue = findColumnValue(item, ["serial_number", "serialnumber", "serial_no"]);
         const natureOfWorkValue = findColumnValue(item, ["nature_of_work", "natureofwork", "work_nature"]);
         const executionStatusValue = findColumnValue(item, ["execution_status", "executionstatus", "status", "wo_status"]);
+        const priorityValue = findColumnValue(item, ["priority", "work_priority", "urgency"]);
         const dataDeliveryDateValue = findColumnValue(item, ["data_delivery_date", "datadeliverydate", "delivery_date"]);
         const poDateValue = findColumnValue(item, ["po_date", "podate", "purchase_order_date"]);
         const documentTypeValue = findColumnValue(item, ["document_type", "documenttype", "doctype"]);
@@ -151,6 +152,7 @@ export async function POST(req: NextRequest) {
           serialNumber: serialValue?.text ?? null,
           natureOfWork: natureOfWorkValue?.text ?? null,
           executionStatus: executionStatusValue?.text ?? null,
+          priority: priorityValue?.text ?? null,
           dataDeliveryDate: dataDeliveryDateValue?.text ?? null,
           poDate: poDateValue?.text ?? null,
           documentType: documentTypeValue?.text ?? null,

@@ -24,11 +24,11 @@ import {
   getCustomerSummary,
   getDataQualityReport,
   getOperationalSummary,
+  getOperationsIntelligenceSummary,
   getPipelineSummary,
   getRevenueSummary,
   getRiskSummary,
   getSectorPerformance,
-  getWorkOrderSummary,
 } from "@/services/analytics";
 
 const OPENAI_MODEL = "gpt-4o-mini";
@@ -45,6 +45,17 @@ export function classifyQuestion(question: string): QueryIntent {
       type: "clarification_needed",
       rawQuestion: text,
       clarificationQuestion: "What do you want me to assess—pipeline, revenue, operations, or risk?",
+    };
+  }
+
+  if (/(headcount|staffing|employee count|team size|salary|payroll|labor cost|hr|personnel|cash flow|inventory|warehouse|marketing spend|budget spend|invoice totals|accounts payable)/.test(lower)) {
+    return {
+      type: "unsupported",
+      rawQuestion: text,
+      timePeriod,
+      sector,
+      customer,
+      unsupportedReason: "The current monday.com data only includes deal pipeline and work-order operational data. Staffing, payroll, and finance metrics are not available in the connected boards.",
     };
   }
 
@@ -178,13 +189,36 @@ export function buildToolPlan(intent: QueryIntent): string[] {
     case "risk_identification":
       return ["getDeals", "getWorkOrders", "getRiskSummary", "getDataQualitySummary"];
     case "work_order_analysis":
-      return ["getWorkOrders", "getWorkOrderSummary", "getDataQualitySummary"];
+      return ["getWorkOrders", "getOperationsIntelligenceSummary", "getWorkOrderSummary", "getDataQualitySummary"];
     case "cross_board_analysis":
       return ["getDeals", "getWorkOrders", "getPipelineSummary", "getWorkOrderSummary", "getDataQualitySummary"];
     case "leadership_summary":
       return ["getDeals", "getWorkOrders", "getPipelineSummary", "getWorkOrderSummary", "getCustomerSummary", "getRiskSummary", "getDataQualitySummary"];
+    case "unsupported":
+      return ["getDataQualitySummary"];
     default:
       return ["getDataQualitySummary"];
+  }
+}
+
+function buildFollowUpSuggestions(intent: QueryIntent): string[] {
+  switch (intent.type) {
+    case "pipeline_analysis":
+      return ["Show top opportunities", "Compare with operations"];
+    case "risk_identification":
+      return ["Show at-risk work orders", "Show top opportunities"];
+    case "work_order_analysis":
+      return ["Show at-risk work orders", "Compare with sales"];
+    case "sector_analysis":
+      return ["Show top opportunities", "Compare with operations"];
+    case "cross_board_analysis":
+      return ["Show top opportunities", "Show at-risk work orders"];
+    case "leadership_summary":
+      return ["Compare sales and operations", "Show top opportunities"];
+    case "unsupported":
+      return ["How is our pipeline looking?", "What work orders are at risk?", "Generate a leadership update"];
+    default:
+      return ["How is our pipeline looking?", "Generate a leadership update"];
   }
 }
 
@@ -269,7 +303,7 @@ async function askOpenAIForInterpretation(payload: Record<string, unknown>): Pro
 
 function formatMoney(value: number | null | undefined): string {
   if (value === null || value === undefined) return "not available";
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 }
 
 function formatPercent(value: number | null | undefined): string {
@@ -301,7 +335,7 @@ function buildPipelineExecutiveResponse(analyticsResult: AnalyticsResult, source
   const headline = totalAvailable ? `Current pipeline is ${formatSourceValue(data.totalPipelineValue)} across ${data.activeOpenDeals} active opportunities.` : `${data.activeOpenDeals} active opportunities were retrieved, but their pipeline value could not be calculated from the available deal values.`;
   const largestValue = largest?.value === null || !largest ? "Not available" : `${largest.dealName ?? "Name unavailable"} · ${formatSourceValue(largest.value)}`;
   const stageRows = data.pipelineByStage.map((stage) => [stage.stage, String(stage.opportunities), stage.pipelineValue === null ? "Not available" : formatSourceValue(stage.pipelineValue)]);
-  const leadingStage = data.pipelineByStage[0];
+  const leadingStage = [...data.pipelineByStage].sort((a, b) => b.opportunities - a.opportunities)[0];
   const insights: string[] = [];
   if (leadingStage) insights.push(`${leadingStage.stage} contains the largest current stage group, with ${leadingStage.opportunities} active opportunities.`);
   if (data.missingInformation.missingDealValue > 0) insights.push(`${data.missingInformation.missingDealValue} active opportunities lack a valid deal value and are excluded from pipeline-value totals.`);
@@ -386,6 +420,9 @@ function buildFallbackResponse(question: string, intent: QueryIntent, analyticsR
     atRiskDeals?: number | null;
     pipelineSummary?: { totalPipelineValue?: number | null };
     operationalSummary?: { completionRate?: number | null };
+    statusOverview?: { completed?: number; ongoing?: number; notStarted?: number; otherStatuses?: Array<{ status: string; count: number }> };
+    atRiskWorkOrders?: { high?: number; medium?: number; low?: number; items?: Array<{ workOrderName?: string | null; status?: string | null; priority?: string | null; relevantDate?: string | null; reason?: string; riskLevel?: string }> };
+    executiveInsight?: string;
   };
   const metrics: Array<{ label: string; value: string; detail?: string }> = [];
   const insights: string[] = [];
@@ -407,6 +444,20 @@ function buildFallbackResponse(question: string, intent: QueryIntent, analyticsR
   }
   if (payload.totalOperationalValue !== undefined && payload.totalOperationalValue !== null) {
     metrics.push({ label: "Operational value", value: formatMoney(payload.totalOperationalValue) });
+  }
+
+  if (payload.statusOverview && payload.completionRate !== undefined && payload.completionRate !== null) {
+    metrics.push({ label: "Completion rate", value: formatPercent(payload.completionRate), detail: `${payload.statusOverview.completed ?? 0} complete / ${payload.totalWorkOrders ?? 0} total` });
+  }
+
+  if (payload.atRiskWorkOrders) {
+    const highRisk = payload.atRiskWorkOrders.high ?? 0;
+    const mediumRisk = payload.atRiskWorkOrders.medium ?? 0;
+    const lowRisk = payload.atRiskWorkOrders.low ?? 0;
+    const totalRisk = highRisk + mediumRisk + lowRisk;
+    if (totalRisk > 0) {
+      metrics.push({ label: "At-risk work orders", value: String(totalRisk), detail: `${highRisk} high / ${mediumRisk} medium / ${lowRisk} low` });
+    }
   }
 
   if (payload.sectors && Array.isArray(payload.sectors) && payload.sectors.length > 0) {
@@ -451,10 +502,25 @@ function buildFallbackResponse(question: string, intent: QueryIntent, analyticsR
     return pipeline !== null && pipeline !== undefined ? `The current pipeline is ${formatMoney(pipeline)}.` : "The current pipeline is not available because the required values are missing or incomplete.";
   })();
 
+  const operationsIntelligence = (analyticsResult.data as {
+    statusOverview?: { completed: number; ongoing: number; notStarted: number; otherStatuses: Array<{ status: string; count: number }> };
+    atRiskWorkOrders?: { high: number; medium: number; low: number; items: Array<{ workOrderName: string | null; status: string | null; priority: string | null; relevantDate: string | null; riskLevel: "High" | "Medium" | "Low"; reason: string }> };
+    completionRate?: number | null;
+    executiveInsight?: string;
+  } | undefined)?.statusOverview
+    ? (analyticsResult.data as {
+        statusOverview: { completed: number; ongoing: number; notStarted: number; otherStatuses: Array<{ status: string; count: number }> };
+        atRiskWorkOrders: { high: number; medium: number; low: number; items: Array<{ workOrderName: string | null; status: string | null; priority: string | null; relevantDate: string | null; riskLevel: "High" | "Medium" | "Low"; reason: string }> };
+        completionRate: number | null;
+        executiveInsight: string;
+      })
+    : undefined;
+
   return {
     answer: answerBase,
     key_metrics: metrics,
     insights: insights.length > 0 ? insights : ["This answer was generated from deterministic calculations only."],
+    operations_intelligence: operationsIntelligence,
     analysis_details: buildAnalysisDetails(intent, analyticsResult, sourceDeals, sourceWorkOrders),
     data_quality: analyticsResult.dataQuality ?? { coveragePercent: 0 },
     sources_context: analyticsResult.sourceBoards ?? ["analytics layer"],
@@ -534,12 +600,28 @@ export async function handleUserQuestion(
   const intent = classifyQuestion(question);
 
   if (intent.type === "clarification_needed") {
+    const unsupportedSubject = !/(pipeline|revenue|work order|deal|risk|sector|operational|performance|leadership|sales|operations)/i.test(question);
+    const followUpSuggestions = ["How is our pipeline looking?", "What work orders are at risk?"];
+
+    if (unsupportedSubject) {
+      return {
+        answer: `I can only analyze sales and work-order data available in the Monday boards. "${question}" is not part of this dataset, so the metric is not available.`,
+        key_metrics: [],
+        insights: ["This request falls outside the data available in the current Deals and Work Orders sources."],
+        data_quality: { coveragePercent: 0, caveats: ["The requested metric is unavailable because it is outside the supported data model."], recordsConsidered: 0, recordsExcluded: 0, exclusionReasons: {} },
+        sources_context: ["Deals", "Work Orders"],
+        follow_up_suggestions: followUpSuggestions,
+        clarificationNeeded: intent.clarificationQuestion,
+      };
+    }
+
     return {
       answer: intent.clarificationQuestion ?? "I need a bit more clarity before I can answer that accurately.",
       key_metrics: [],
       insights: ["The question is ambiguous, so the answer is intentionally deferred rather than guessed."],
       data_quality: { coveragePercent: 0, caveats: ["Clarification required."], recordsConsidered: 0, recordsExcluded: 0, exclusionReasons: {} },
       sources_context: ["clarification required"],
+      follow_up_suggestions: followUpSuggestions,
       clarificationNeeded: intent.clarificationQuestion,
     };
   }
@@ -566,7 +648,7 @@ export async function handleUserQuestion(
       analyticsResult = getRiskSummary(sourceDeals, sourceWorkOrders, intent);
       break;
     case "work_order_analysis":
-      analyticsResult = getWorkOrderSummary(sourceWorkOrders, intent);
+      analyticsResult = getOperationsIntelligenceSummary(sourceWorkOrders, intent);
       break;
     case "cross_board_analysis":
       analyticsResult = {
@@ -602,7 +684,8 @@ export async function handleUserQuestion(
 
   // Pipeline answers are intentionally deterministic: no LLM may alter or invent them.
   if (intent.type === "pipeline_analysis" && analyticsResult) {
-    return buildPipelineExecutiveResponse(analyticsResult, sourceDeals, intent);
+    const response = buildPipelineExecutiveResponse(analyticsResult, sourceDeals, intent);
+    return { ...response, follow_up_suggestions: buildFollowUpSuggestions(intent) };
   }
 
   if (!analyticsResult || !(sourceDeals.length || sourceWorkOrders.length)) {
@@ -630,25 +713,39 @@ export async function handleUserQuestion(
         ? normalizeLeadershipUpdate(generateLeadershipUpdateData(sourceDeals, sourceWorkOrders).data)
         : undefined);
 
+    const operationsIntelligence = intent.type === "work_order_analysis"
+      ? (getOperationsIntelligenceSummary(sourceWorkOrders, intent).data as unknown as AgentResponse["operations_intelligence"])
+      : undefined;
+
+    const executiveBrief = intent.type === "leadership_summary"
+      ? (generateLeadershipUpdateData(sourceDeals, sourceWorkOrders).data as { executiveBrief?: AgentResponse["executiveBrief"] }).executiveBrief
+      : undefined;
+
     return {
       ...structured,
+      operations_intelligence: structured.operations_intelligence ?? operationsIntelligence,
       leadership_update: normalizedLead,
+      executiveBrief,
       analysis_details: structured.analysis_details ?? buildAnalysisDetails(intent, analyticsResult, sourceDeals, sourceWorkOrders),
       data_quality: structured.data_quality ?? analyticsResult.dataQuality,
       sources_context: structured.sources_context ?? analyticsResult.sourceBoards,
+      follow_up_suggestions: ["How is our pipeline looking?", "What work orders are at risk?"],
     };
   }
 
   if (intent.type === "leadership_summary") {
+    const brief = generateLeadershipUpdateData(sourceDeals, sourceWorkOrders).data as { executiveBrief?: AgentResponse["executiveBrief"] };
     const leadershipUpdate = normalizeLeadershipUpdate(generateLeadershipUpdateData(sourceDeals, sourceWorkOrders).data);
     return {
       answer: `Leadership update: ${String(leadershipUpdate?.business_snapshot ?? "Current business conditions are being tracked with available source data.")}`,
       key_metrics: [],
       insights: Array.isArray(leadershipUpdate?.positive_trends) ? leadershipUpdate.positive_trends : [],
       leadership_update: leadershipUpdate,
+      executiveBrief: brief.executiveBrief,
       analysis_details: buildAnalysisDetails(intent, analyticsResult, sourceDeals, sourceWorkOrders),
       data_quality: analyticsResult.dataQuality,
       sources_context: analyticsResult.sourceBoards,
+      follow_up_suggestions: ["How is our pipeline looking?", "What work orders are at risk?"],
     };
   }
 

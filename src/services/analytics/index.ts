@@ -113,6 +113,100 @@ function isDelayedWorkOrder(status: string | null, probableEndDate: string | nul
   return false;
 }
 
+function normalizePriorityText(priority: string | null | undefined): string | null {
+  const text = normalizeStatusText(priority ?? "");
+  if (!text) return null;
+  const mapping: Record<string, string> = {
+    "high priority": "High",
+    "urgent": "High",
+    high: "High",
+    medium: "Medium",
+    "medium priority": "Medium",
+    low: "Low",
+    "low priority": "Low",
+  };
+  return mapping[text] ?? text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+export interface WorkOrderRiskAssessment {
+  workOrder: string | null;
+  riskLevel: "High" | "Medium" | "Low";
+  riskScore: number;
+  reasons: string[];
+}
+
+export function getWorkOrderRiskAssessment(order: NormalizedWorkOrder): WorkOrderRiskAssessment {
+  const status = order.executionStatus ?? "Unknown";
+  const priority = normalizePriorityText(order.priority);
+  const dueDate = order.probableEndDate ?? order.dataDeliveryDate ?? null;
+  const startDate = order.probableStartDate ?? null;
+  const statusText = normalizeStatusText(status);
+  const incomplete = !isCompletedWorkOrder(status) && !["cancelled", "canceled", "closed", "won", "lost"].includes(statusText);
+  const reasons: string[] = [];
+  let score = 0;
+
+  if (isDelayedWorkOrder(status, dueDate) || (dueDate && parseDate(dueDate)! !== null && parseDate(dueDate)! < new Date() && !isCompletedWorkOrder(status))) {
+    score += 55;
+    reasons.push("Overdue: the expected end date has passed and the work remains incomplete.");
+  }
+
+  if (dueDate) {
+    const parsed = parseDate(dueDate);
+    if (parsed && !isCompletedWorkOrder(status)) {
+      const diffDays = Math.ceil((parsed.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+      if (diffDays >= 0 && diffDays <= 7) {
+        score += 25;
+        reasons.push(`Deadline approaching: the due date is ${diffDays} day${diffDays === 1 ? "" : "s"} away while the work is still open.`);
+      }
+    }
+  }
+
+  if (priority === "High") {
+    score += 15;
+    reasons.push("High priority: this work requires close attention from operations and leadership.");
+  }
+
+  if (isNotStartedWorkOrder(status)) {
+    score += 20;
+    reasons.push("Not started: this work has not yet begun despite being scheduled or active.");
+  }
+
+  if (isOngoingWorkOrder(status) && startDate) {
+    const parsedStart = parseDate(startDate);
+    if (parsedStart) {
+      const diffDays = Math.ceil((Date.now() - parsedStart.getTime()) / (1000 * 60 * 60 * 24));
+      if (diffDays > 30) {
+        score += 20;
+        reasons.push(`Ongoing for too long: the work started ${diffDays} days ago and is still active.`);
+      }
+    }
+  }
+
+  if (incomplete) {
+    score += 10;
+    reasons.push("Incomplete work order: this record is not marked complete.");
+  }
+
+  const dedupedReasons = [...new Set(reasons)];
+  const normalizedScore = Math.min(score, 100);
+  const riskLevel: "High" | "Medium" | "Low" = normalizedScore >= 80 ? "High" : normalizedScore >= 40 ? "Medium" : "Low";
+
+  return {
+    workOrder: order.dealNameMasked ?? order.serialNumber ?? "Unnamed work order",
+    riskLevel,
+    riskScore: normalizedScore,
+    reasons: dedupedReasons.length > 0 ? dedupedReasons : ["No material risk signals were identified from the available status and date fields."],
+  };
+}
+
+function getRiskReason(order: NormalizedWorkOrder): string {
+  return getWorkOrderRiskAssessment(order).reasons[0] ?? "No material risk signals were identified from the available status and date fields.";
+}
+
+function getWorkOrderRiskLevel(order: NormalizedWorkOrder): "High" | "Medium" | "Low" {
+  return getWorkOrderRiskAssessment(order).riskLevel;
+}
+
 function sum(values: Array<number | null | undefined>): number {
   return values
     .filter((value): value is number => value !== null && value !== undefined && Number.isFinite(value))
@@ -143,16 +237,25 @@ function getQuarterStartMonth(month: number): number {
 }
 
 function buildTimeRange(intent: QueryIntent | undefined, fallbackLabel: FilterKey = "this_year"): TimeRange {
-  const label = intent?.timePeriod?.label ?? fallbackLabel;
+  const explicitTimePeriod = intent?.timePeriod;
+  if (!explicitTimePeriod) {
+    return {
+      label: "all_available_data",
+      start: null,
+      end: null,
+    };
+  }
+
+  const label = explicitTimePeriod.label ?? fallbackLabel;
   const today = new Date();
   const nowYear = today.getFullYear();
   const nowMonth = today.getMonth();
 
-  if (intent?.timePeriod?.start || intent?.timePeriod?.end) {
+  if (explicitTimePeriod.start || explicitTimePeriod.end) {
     return {
-      label: intent.timePeriod?.label ?? "custom",
-      start: intent.timePeriod?.start ? new Date(intent.timePeriod.start) : null,
-      end: intent.timePeriod?.end ? new Date(intent.timePeriod.end) : null,
+      label: explicitTimePeriod.label ?? "custom",
+      start: explicitTimePeriod.start ? new Date(explicitTimePeriod.start) : null,
+      end: explicitTimePeriod.end ? new Date(explicitTimePeriod.end) : null,
     };
   }
 
@@ -249,6 +352,7 @@ function filterDealsByTimeRange(deals: NormalizedDeal[], intent?: QueryIntent): 
 }
 
 function filterOrdersByTimeRange(workOrders: NormalizedWorkOrder[], intent?: QueryIntent): NormalizedWorkOrder[] {
+  if (!intent?.timePeriod) return workOrders;
   const range = buildTimeRange(intent, "this_year");
   if (!range.start || !range.end) return workOrders;
 
@@ -356,7 +460,9 @@ export function getPipelineSummary(
   const data = {
     recordsAnalyzed: totalDeals,
     recordsExcluded: Math.max(deals.length - totalDeals, 0),
-    timeRange: { label: intent?.timePeriod?.label ?? "this_year", start: buildTimeRange(intent, "this_year").start?.toISOString() ?? null, end: buildTimeRange(intent, "this_year").end?.toISOString() ?? null },
+    timeRange: intent?.timePeriod
+      ? { label: intent.timePeriod.label, start: buildTimeRange(intent, "this_year").start?.toISOString() ?? null, end: buildTimeRange(intent, "this_year").end?.toISOString() ?? null }
+      : { label: "all_available_data", start: null, end: null },
     totalPipelineValue: safeRound(activePipelineValue),
     activePipelineValue: safeRound(activePipelineValue),
     closedWonValue: safeRound(closedWonValue),
@@ -599,26 +705,70 @@ export function getOperationsIntelligenceSummary(
   intent: QueryIntent,
 ): AnalyticsResult {
   const summary = getOperationalSummary(workOrders, intent);
+  const relevantOrders = filterOrdersByTimeRange(workOrders, intent);
   const data = summary.data as {
-    completedWorkOrders: number; ongoingWorkOrders: number; notStartedWorkOrders: number;
-    completionRate: number | null; delayedWorkOrders: number; workOrdersByStatus: Record<string, number>;
+    completedWorkOrders: number;
+    ongoingWorkOrders: number;
+    notStartedWorkOrders: number;
+    completionRate: number | null;
+    workOrdersByStatus: Record<string, number>;
   };
-  const riskItems = filterOrdersByTimeRange(workOrders, intent)
-    .filter((order) => isDelayedWorkOrder(order.executionStatus, order.probableEndDate))
-    .map((order) => ({ itemId: order.itemId, riskLevel: "high", status: order.executionStatus, probableEndDate: order.probableEndDate }));
-  const recognized = new Set(["Completed", "In Progress", "Not Started"]);
+
+  const recognized = new Set(["Completed", "In Progress", "Inprogress", "Ongoing", "Not Started", "Notstarted", "Open", "Started", "Active", "Pending"]);
+  const rawStatusCounts = Object.entries(data.workOrdersByStatus ?? {});
+
+  const allAssessmentItems = relevantOrders.map((order) => {
+    const assessment = getWorkOrderRiskAssessment(order);
+    const relevantDate = order.probableEndDate ?? order.dataDeliveryDate ?? order.probableStartDate ?? null;
+    return {
+      workOrderName: assessment.workOrder,
+      status: order.executionStatus ?? "Unknown",
+      priority: normalizePriorityText(order.priority) ?? (order.priority ?? "Not specified"),
+      relevantDate,
+      riskLevel: assessment.riskLevel,
+      riskScore: assessment.riskScore,
+      reason: assessment.reasons[0] ?? "No material risk signals were identified from the available status and date fields.",
+      reasons: assessment.reasons,
+    };
+  });
+
+  const riskItems = allAssessmentItems
+    .filter((item) => item.riskLevel === "High" || item.riskLevel === "Medium")
+    .sort((a, b) => {
+      const order = { High: 3, Medium: 2, Low: 1 } as Record<string, number>;
+      return (order[b.riskLevel] ?? 0) - (order[a.riskLevel] ?? 0) || (b.riskScore ?? 0) - (a.riskScore ?? 0);
+    });
+
+  const highRisk = allAssessmentItems.filter((item) => item.riskLevel === "High").length;
+  const mediumRisk = allAssessmentItems.filter((item) => item.riskLevel === "Medium").length;
+  const lowRisk = allAssessmentItems.filter((item) => item.riskLevel === "Low").length;
+
+  const statusSummary = {
+    completed: data.completedWorkOrders,
+    ongoing: data.ongoingWorkOrders,
+    notStarted: data.notStartedWorkOrders,
+    otherStatuses: rawStatusCounts
+      .filter(([status]) => !recognized.has(status) && !["Completed", "In Progress", "Not Started", "Ongoing", "Started"].includes(status))
+      .map(([status, count]) => ({ status, count })),
+  };
+
+  const executiveInsight = riskItems.length > 0
+    ? `${riskItems.length} work order${riskItems.length === 1 ? " requires" : "s require"} attention, including ${highRisk} high-risk item${highRisk === 1 ? "" : "s"}.`
+    : "No work orders currently require attention based on the available status and date signals.";
+
   return {
     ...summary,
     data: {
       ...data,
-      statusOverview: {
-        completed: data.completedWorkOrders,
-        ongoing: data.ongoingWorkOrders,
-        notStarted: data.notStartedWorkOrders,
-        otherStatuses: Object.entries(data.workOrdersByStatus).filter(([status]) => !recognized.has(status)).map(([status, count]) => ({ status, count })),
+      statusOverview: statusSummary,
+      completionRate: data.completionRate,
+      atRiskWorkOrders: {
+        high: highRisk,
+        medium: mediumRisk,
+        low: lowRisk,
+        items: riskItems,
       },
-      atRiskWorkOrders: { high: riskItems.length, medium: 0, low: 0, items: riskItems },
-      executiveInsight: riskItems.length > 0 ? `${riskItems.length} high-risk work order${riskItems.length === 1 ? " requires" : "s require"} attention based on explicit delayed or overdue signals.` : "No high-risk work orders were identified from the available explicit status and date signals.",
+      executiveInsight,
     },
   };
 }
@@ -809,10 +959,45 @@ export function generateLeadershipUpdateData(
   if (pipelineValue === null) leadershipAttention.push("Strengthen the data capture for deal values and close dates so leadership reporting stays reliable.");
   if (leadershipAttention.length === 0) leadershipAttention.push("Maintain current execution discipline and continue monitoring the operating plan for variance.");
 
+  const briefSummary = [
+    `Pipeline coverage is ${pipelineValue !== null ? formatCurrencyForNarrative(pipelineValue) : "not available"} across ${pipeline.data.numberOfDeals ?? 0} relevant deal${(pipeline.data.numberOfDeals ?? 0) === 1 ? "" : "s"}.`,
+    completionRate !== null
+      ? `Operational completion rate is ${formatPercentNarrative(completionRate)} with ${delayedOrders} delayed work order${delayedOrders === 1 ? "" : "s"} in scope.`
+      : "Operational completion rate is unavailable because execution-status data is insufficient.",
+    atRiskDeals > 0
+      ? `${atRiskDeals} deal${atRiskDeals === 1 ? "" : "s"} are flagged as at risk and should be reviewed before the next operating cycle.`
+      : "No deal-level risk flags were identified in the current scope.",
+  ];
+
+  const executiveBrief = {
+    title: "WEEKLY LEADERSHIP BRIEF",
+    summary: briefSummary,
+    sales: {
+      pipelineValue: pipelineValue !== null ? formatCurrencyForNarrative(pipelineValue) : "N/A",
+      activeOpportunities: pipeline.data.activeOpenDeals ?? 0,
+      closedWon: typeof pipelineData.closedWonDeals === "number" ? pipelineData.closedWonDeals : null,
+      closedLost: typeof pipelineData.closedLostDeals === "number" ? pipelineData.closedLostDeals : null,
+      largestOpportunity: typeof pipelineData.largestActiveOpportunity === "number" ? formatCurrencyForNarrative(pipelineData.largestActiveOpportunity) : "N/A",
+      strongestSector: Array.isArray(pipelineData.bySector) ? "Unknown" : Object.entries((pipelineData.bySector ?? {}) as Record<string, number>).sort(([, a], [, b]) => b - a)[0]?.[0] ?? "Unknown",
+      weightedPipelineValue: weightedPipelineValue !== null ? formatCurrencyForNarrative(weightedPipelineValue) : "N/A",
+    },
+    operations: {
+      totalWorkOrders: operations.data.totalWorkOrders ?? 0,
+      completionRate: completionRate !== null ? `${Number(completionRate).toFixed(1)}%` : "N/A",
+      ongoingWorkOrders: typeof operationsData.ongoingWorkOrders === "number" ? operationsData.ongoingWorkOrders : 0,
+      atRiskWorkOrders: delayedOrders,
+      notStartedWorkOrders: typeof operationsData.notStartedWorkOrders === "number" ? operationsData.notStartedWorkOrders : 0,
+    },
+    risks: keyRisks.length > 0 ? keyRisks : ["No material risks were identified from the currently available signals."],
+    recommendedActions: leadershipAttention.length > 0 ? leadershipAttention : ["Continue routine monitoring and confirm execution dates for active work orders."],
+    caveats: qualityCaveats,
+  };
+
   const leadData = {
     pipelineSummary: pipeline.data,
     operationalSummary: operations.data,
     riskSummary: risk.data,
+    executiveBrief,
     business_snapshot: pipelineValue !== null
       ? `Pipeline coverage stands at ${formatCurrencyForNarrative(pipelineValue)} across ${pipeline.data.numberOfDeals ?? 0} relevant deal${(pipeline.data.numberOfDeals ?? 0) === 1 ? "" : "s"}.`
       : "Pipeline coverage is unavailable because the underlying deal values are not reliable enough for a current snapshot.",
@@ -872,14 +1057,16 @@ export function getExecutiveKpis(
   intent: QueryIntent = { rawQuestion: "Executive KPI summary", type: "leadership_summary" },
 ) {
   const pipeline = getPipelineSummary(deals, { ...intent, type: "pipeline_analysis" });
-  const risk = getRiskSummary(deals, workOrders, { ...intent, type: "risk_identification" });
-  const operations = getOperationalSummary(workOrders, { ...intent, type: "work_order_analysis" });
+  const operations = getOperationsIntelligenceSummary(workOrders, { ...intent, type: "work_order_analysis" });
+  const atRiskSummary = (operations.data as { atRiskWorkOrders?: { high?: number; medium?: number; low?: number } }).atRiskWorkOrders ?? { high: 0, medium: 0, low: 0 };
 
   return {
     totalPipeline: pipeline.data.totalPipelineValue ?? null,
     openDeals: pipeline.data.activeOpenDeals ?? null,
     winRate: pipeline.data.winRate ?? null,
-    atRiskWorkOrders: risk.data.delayedWorkOrders ?? null,
+    atRiskWorkOrders: (atRiskSummary.high ?? 0) + (atRiskSummary.medium ?? 0),
+    highRiskWorkOrders: atRiskSummary.high ?? 0,
+    mediumRiskWorkOrders: atRiskSummary.medium ?? 0,
     closedWon: pipeline.data.closedWonDeals ?? null,
     completionRate: operations.data.completionRate ?? null,
     generatedAt: new Date().toISOString(),

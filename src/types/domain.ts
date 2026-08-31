@@ -65,6 +65,7 @@ export interface WorkOrder {
   serialNumber: unknown;
   natureOfWork: unknown;
   executionStatus: unknown;
+  priority?: unknown;
   dataDeliveryDate: unknown;
   poDate: unknown;
   documentType: unknown;
@@ -131,6 +132,7 @@ export interface NormalizedWorkOrder extends WorkOrder {
   serialNumber: string | null;
   natureOfWork: string | null;
   executionStatus: string | null;
+  priority?: string | null;
   dataDeliveryDate: string | null;
   poDate: string | null;
   documentType: string | null;
@@ -183,6 +185,7 @@ export interface QueryIntent {
   };
   rawQuestion: string;
   clarificationQuestion?: string;
+  unsupportedReason?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +266,54 @@ export interface AnalysisDetails {
   reason: string[];
 }
 
+export interface OperationsIntelligenceSummary {
+  statusOverview: {
+    completed: number;
+    ongoing: number;
+    notStarted: number;
+    otherStatuses: Array<{ status: string; count: number }>;
+  };
+  completionRate: number | null;
+  atRiskWorkOrders: {
+    high: number;
+    medium: number;
+    low: number;
+    items: Array<{
+      workOrderName: string | null;
+      status: string | null;
+      priority: string | null;
+      relevantDate: string | null;
+      riskLevel: "High" | "Medium" | "Low";
+      reason: string;
+      reasons?: string[];
+      riskScore?: number;
+    }>;
+  };
+  executiveInsight: string;
+}
+
+export interface ExecutiveBrief {
+  title: string;
+  summary: string[];
+  sales: {
+    pipelineValue: string;
+    activeOpportunities: number | null;
+    closedWon: number | null;
+    closedLost: number | null;
+    largestOpportunity: string;
+    strongestSector: string;
+  };
+  operations: {
+    totalWorkOrders: number | null;
+    completionRate: string;
+    ongoingWorkOrders: number | null;
+    atRiskWorkOrders: number | null;
+  };
+  risks: string[];
+  recommendedActions: string[];
+  caveats: string[];
+}
+
 export interface AgentResponse {
   answer: string;
   executive_headline?: string;
@@ -272,12 +323,15 @@ export interface AgentResponse {
   insights?: string[];
   kpis?: KpiCardData[];
   table?: TableData;
+  operations_intelligence?: OperationsIntelligenceSummary;
   leadership_update?: LeadershipUpdate;
+  executiveBrief?: ExecutiveBrief;
   analysis_details?: AnalysisDetails;
   data_quality?: DataQualityReport | Record<string, unknown>;
   dataQuality?: DataQualityReport;
   caveats?: string[];
   sources_context?: string[];
+  follow_up_suggestions?: string[];
   clarificationNeeded?: string;
   error?: string;
 }

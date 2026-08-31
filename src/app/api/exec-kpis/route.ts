@@ -73,6 +73,7 @@ export async function GET() {
         const serialValue = findColumnValue(item, ["serial_number", "serialnumber", "serial_no"]);
         const natureOfWorkValue = findColumnValue(item, ["nature_of_work", "natureofwork", "work_nature"]);
         const executionStatusValue = findColumnValue(item, ["execution_status", "executionstatus", "status", "wo_status"]);
+        const priorityValue = findColumnValue(item, ["priority", "work_priority", "urgency"]);
         const dataDeliveryDateValue = findColumnValue(item, ["data_delivery_date", "datadeliverydate", "delivery_date"]);
         const poDateValue = findColumnValue(item, ["po_date", "podate", "purchase_order_date"]);
         const documentTypeValue = findColumnValue(item, ["document_type", "documenttype", "doctype"]);
@@ -98,6 +99,7 @@ export async function GET() {
           serialNumber: serialValue?.text ?? null,
           natureOfWork: natureOfWorkValue?.text ?? null,
           executionStatus: executionStatusValue?.text ?? null,
+          priority: priorityValue?.text ?? null,
           dataDeliveryDate: dataDeliveryDateValue?.text ?? null,
           poDate: poDateValue?.text ?? null,
           documentType: documentTypeValue?.text ?? null,

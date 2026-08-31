@@ -16,6 +16,8 @@ interface ExecutiveKpiSnapshot {
   openDeals: number | null;
   winRate: number | null;
   atRiskWorkOrders: number | null;
+  highRiskWorkOrders?: number | null;
+  mediumRiskWorkOrders?: number | null;
   closedWon: number | null;
   completionRate: number | null;
   generatedAt: string;
@@ -82,12 +84,23 @@ export function ChatShell() {
   }, [entries]);
 
   useEffect(() => {
-    void refreshKpis();
+    let cancelled = false;
+
+    const loadKpis = async () => {
+      if (cancelled) return;
+      await refreshKpis();
+    };
+
+    void loadKpis();
+
     const intervalId = window.setInterval(() => {
-      void refreshKpis();
+      if (!cancelled) {
+        void refreshKpis();
+      }
     }, 60000);
 
     return () => {
+      cancelled = true;
       window.clearInterval(intervalId);
     };
   }, [refreshKpis]);
@@ -166,7 +179,9 @@ export function ChatShell() {
     { label: "TOTAL PIPELINE", value: formatCurrency(kpis?.totalPipeline ?? null), sublabel: "Total active pipeline value" },
     { label: "OPEN DEALS", value: formatInteger(kpis?.openDeals ?? null), sublabel: "Active opportunities" },
     { label: "WIN RATE", value: formatPercentage(kpis?.winRate ?? null), sublabel: "Closed won / lost" },
-    { label: "AT-RISK WORK ORDERS", value: formatInteger(kpis?.atRiskWorkOrders ?? null), sublabel: "Delayed or blocked" },
+    { label: "AT-RISK WORK ORDERS", value: formatInteger(kpis?.atRiskWorkOrders ?? null), sublabel: `High ${formatInteger(kpis?.highRiskWorkOrders ?? 0)} / Medium ${formatInteger(kpis?.mediumRiskWorkOrders ?? 0)}` },
+    { label: "HIGH-RISK WORK ORDERS", value: formatInteger(kpis?.highRiskWorkOrders ?? null), sublabel: "Immediate attention" },
+    { label: "MEDIUM-RISK WORK ORDERS", value: formatInteger(kpis?.mediumRiskWorkOrders ?? null), sublabel: "Monitor closely" },
     { label: "CLOSED WON", value: formatInteger(kpis?.closedWon ?? null), sublabel: "Closed deals" },
     { label: "COMPLETION RATE", value: formatPercentage(kpis?.completionRate ?? null), sublabel: "Operational completion" },
   ];

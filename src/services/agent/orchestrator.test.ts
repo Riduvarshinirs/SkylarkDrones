@@ -6,6 +6,7 @@ import {
   classifyQuestion,
   handleUserQuestion,
 } from "./orchestrator";
+import { SUGGESTED_QUESTION_GROUPS } from "@/components/chat/SuggestedQuestions";
 
 const baseDeals = [
   {
@@ -89,6 +90,7 @@ const baseWorkOrders = [
     invoiceStatus: "Paid",
     woStatusBilled: "Completed",
     billingStatus: "Paid",
+    priority: "Low",
     qualityFlags: [],
     isUsableForValueCalc: true,
     isUsableForDateCalc: true,
@@ -117,6 +119,7 @@ const baseWorkOrders = [
     invoiceStatus: "Pending",
     woStatusBilled: "Delayed",
     billingStatus: "Open",
+    priority: "High",
     qualityFlags: [],
     isUsableForValueCalc: true,
     isUsableForDateCalc: true,
@@ -184,8 +187,10 @@ test("handleUserQuestion returns a structured response with key metrics", async 
     });
 
     assert.equal(result.answer.length > 0, true);
-    assert.ok(Array.isArray(result.key_metrics));
-    assert.ok(Array.isArray(result.insights));
+    assert.deepEqual(result.key_metrics?.map((metric) => metric.label), ["Total Pipeline", "Active Opportunities", "Closed Won", "Largest Opportunity"]);
+    assert.deepEqual(result.table?.columns, ["Pipeline stage", "Active opportunities", "Pipeline value"]);
+    assert.ok(result.recommended_action?.length);
+    assert.match(result.answer, /1,20,000/);
     assert.ok(result.data_quality);
   } finally {
     restoreFetch();
@@ -231,6 +236,33 @@ test("leadership update is decision-oriented and grounded in the data", async ()
   } finally {
     restoreFetch();
   }
+});
+
+test("suggested question groups match the requested executive categories", () => {
+  assert.deepEqual(SUGGESTED_QUESTION_GROUPS.SALES, [
+    "How is our pipeline looking?",
+    "What are our biggest opportunities?",
+    "Which sector is strongest?",
+  ]);
+  assert.deepEqual(SUGGESTED_QUESTION_GROUPS.OPERATIONS, [
+    "What work orders are at risk?",
+    "How are operations performing?",
+  ]);
+  assert.deepEqual(SUGGESTED_QUESTION_GROUPS.EXECUTIVE, [
+    "Compare sales and operations",
+    "Generate a leadership update",
+  ]);
+});
+
+test("unsupported questions explain missing monday.com data instead of guessing", async () => {
+  const result = await handleUserQuestion("What is our employee headcount?", [], {
+    deals: baseDeals,
+    workOrders: baseWorkOrders,
+  });
+
+  assert.equal(result.answer.toLowerCase().includes("employee") || result.answer.toLowerCase().includes("missing") || result.answer.toLowerCase().includes("not available"), true);
+  assert.ok(Array.isArray(result.follow_up_suggestions));
+  assert.ok(result.follow_up_suggestions?.includes("How is our pipeline looking?"));
 });
 
 test("handleUserQuestion survives OpenAI API failure", async () => {
