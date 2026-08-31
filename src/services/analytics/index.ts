@@ -594,6 +594,35 @@ export function getOperationalSummary(
   };
 }
 
+export function getOperationsIntelligenceSummary(
+  workOrders: NormalizedWorkOrder[],
+  intent: QueryIntent,
+): AnalyticsResult {
+  const summary = getOperationalSummary(workOrders, intent);
+  const data = summary.data as {
+    completedWorkOrders: number; ongoingWorkOrders: number; notStartedWorkOrders: number;
+    completionRate: number | null; delayedWorkOrders: number; workOrdersByStatus: Record<string, number>;
+  };
+  const riskItems = filterOrdersByTimeRange(workOrders, intent)
+    .filter((order) => isDelayedWorkOrder(order.executionStatus, order.probableEndDate))
+    .map((order) => ({ itemId: order.itemId, riskLevel: "high", status: order.executionStatus, probableEndDate: order.probableEndDate }));
+  const recognized = new Set(["Completed", "In Progress", "Not Started"]);
+  return {
+    ...summary,
+    data: {
+      ...data,
+      statusOverview: {
+        completed: data.completedWorkOrders,
+        ongoing: data.ongoingWorkOrders,
+        notStarted: data.notStartedWorkOrders,
+        otherStatuses: Object.entries(data.workOrdersByStatus).filter(([status]) => !recognized.has(status)).map(([status, count]) => ({ status, count })),
+      },
+      atRiskWorkOrders: { high: riskItems.length, medium: 0, low: 0, items: riskItems },
+      executiveInsight: riskItems.length > 0 ? `${riskItems.length} high-risk work order${riskItems.length === 1 ? " requires" : "s require"} attention based on explicit delayed or overdue signals.` : "No high-risk work orders were identified from the available explicit status and date signals.",
+    },
+  };
+}
+
 export function getCustomerSummary(
   deals: NormalizedDeal[],
   workOrders: NormalizedWorkOrder[],

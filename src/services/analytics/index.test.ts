@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import type { NormalizedDeal, NormalizedWorkOrder } from "@/types/domain";
 import {
   getOperationalSummary,
+  getExecutiveKpis,
+  getOperationsIntelligenceSummary,
   getPipelineSummary,
   getRevenueSummary,
   getRiskSummary,
@@ -175,6 +177,25 @@ test("risk summary flags delayed exposure without guessing", () => {
   const result = getRiskSummary(deals, workOrders, { rawQuestion: "Risk summary", type: "risk_identification", timePeriod: fullDateRange });
   assert.equal(result.data.atRiskDeals, 0);
   assert.equal(result.data.delayedWorkOrders, 1);
+});
+
+test("operations intelligence summarizes status, completion rate, and at-risk work orders deterministically", () => {
+  const result = getOperationsIntelligenceSummary(workOrders, { rawQuestion: "What is the operational status?", type: "work_order_analysis", timePeriod: fullDateRange });
+  const data = result.data as {
+    statusOverview: { completed: number; ongoing: number; notStarted: number; otherStatuses: Array<{ status: string; count: number }> };
+    completionRate: number | null;
+    atRiskWorkOrders: { high: number; medium: number; low: number; items: Array<{ riskLevel: string }> };
+    executiveInsight: string;
+  };
+
+  assert.equal(data.statusOverview.completed, 1);
+  assert.equal(data.statusOverview.ongoing, 1);
+  assert.equal(data.statusOverview.notStarted, 0);
+  assert.equal(data.completionRate, 50);
+  assert.equal(data.atRiskWorkOrders.high, 1);
+  assert.equal(data.atRiskWorkOrders.medium, 0);
+  assert.equal(data.atRiskWorkOrders.low, 0);
+  assert.match(data.executiveInsight, /attention|high-risk/i);
 });
 
 test("active pipeline excludes closed won and lost deals and measures work-order completion deterministically", () => {

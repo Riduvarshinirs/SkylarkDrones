@@ -461,14 +461,14 @@ function buildFallbackResponse(question: string, intent: QueryIntent, analyticsR
   };
 }
 
-function inferTimePeriod(text: string): { label: string; start?: string; end?: string } {
+function inferTimePeriod(text: string): { label: string; start?: string; end?: string } | undefined {
   if (/this quarter|quarter/.test(text)) return { label: "this_quarter" };
   if (/last quarter/.test(text)) return { label: "last_quarter" };
   if (/this month/.test(text)) return { label: "this_month" };
   if (/this week/.test(text)) return { label: "this_week" };
   if (/this year/.test(text)) return { label: "this_year" };
   if (/last year/.test(text)) return { label: "last_year" };
-  return { label: "this_year" };
+  return undefined;
 }
 
 function inferSector(text: string): string | undefined {
